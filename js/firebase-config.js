@@ -13,14 +13,16 @@
  */
 
 export const FIREBASE_CONFIG = {
-  apiKey: "YOUR_API_KEY",
-  authDomain: "YOUR_PROJECT_ID.firebaseapp.com",
-  databaseURL: "https://YOUR_PROJECT_ID-default-rtdb.asia-southeast1.firebasedatabase.app",
-  projectId: "YOUR_PROJECT_ID",
-  storageBucket: "YOUR_PROJECT_ID.firebasestorage.app",
-  messagingSenderId: "YOUR_SENDER_ID",
-  appId: "YOUR_APP_ID"
+  apiKey: "AIzaSyCq_DqJ2P9Q1kDH8cW2nL8R0ZdEiyr8izg",
+  authDomain: "yangju-fb146.firebaseapp.com",
+  databaseURL: "https://yangju-fb146-default-rtdb.asia-southeast1.firebasedatabase.app",
+  projectId: "yangju-fb146",
+  storageBucket: "yangju-fb146.firebasestorage.app",
+  messagingSenderId: "1008022251308",
+  appId: "1:1008022251308:web:756d56e46cbd8a5d936e89",
+  measurementId: "G-M6L575K915"
 };
+
 
 /**
  * 학교 초기 기본값 (최초 접속 후 '명단·설정' 탭에서 언제든 수정 가능)
