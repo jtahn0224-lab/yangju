@@ -1099,7 +1099,7 @@ function openGuidanceModal(studentId) {
 
   state.modalStudentId = studentId;
   el.guidanceModalStudent.textContent = `${formatStudentId(stu)} ${stu.name} (${stu.grade}학년 ${stu.classNum}반 ${stu.number}번)`;
-  el.modalIncludeLate.checked = isPastLateThreshold();
+  el.modalIncludeLate.checked = false;
   el.modalGuidanceMemo.value = "";
 
   const items = state.settings.guidanceItems || [];
