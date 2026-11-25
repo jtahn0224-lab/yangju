@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#1e3a8a" />
+  <title>교문지도 실시간 체크</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
+  <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
+  <link rel="stylesheet" href="./css/style.css" />
+</head>
+<body>
+  <!-- 교사 접속(PIN) 게이트 화면 -->
+  <section id="login-screen" class="login-screen" aria-label="교사 접속 인증">
+    <div class="login-card">
+      <div class="login-badge">
+        <span class="status-dot" id="login-sync-dot"></span>
+        <span id="login-sync-label">연결 확인 중...</span>
+      </div>
+
+      <div class="login-brand">
+        <div class="brand-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+            <path d="m9 12 2 2 4-4"/>
+          </svg>
+        </div>
+        <h1 id="login-school-name">교문지도 실시간 체크</h1>
+        <p class="login-subtitle">선생님 성함과 교사 접속 PIN을 입력해 시작하세요.</p>
+      </div>
+
+      <form id="login-form" class="login-form" novalidate>
+        <div class="form-group">
+          <label for="teacher-name-input">담당 교사 성함</label>
+          <input
+            id="teacher-name-input"
+            name="teacherName"
+            type="text"
+            placeholder="예: 김선생"
+            autocomplete="name"
+            maxlength="20"
+            required
+          />
+          <div id="recent-teachers" class="chip-row" aria-label="최근 접속 교사"></div>
+        </div>
+
+        <div class="form-group">
+          <label for="pin-input">교사 접속 비밀번호 (PIN)</label>
+          <input
+            id="pin-input"
+            name="pin"
+            type="password"
+            inputmode="numeric"
+            placeholder="PIN 입력 (기본값: 1234)"
+            autocomplete="current-password"
+            maxlength="12"
+            required
+          />
+          <p class="form-hint" id="login-pin-hint">초기 기본 PIN은 <strong>1234</strong>입니다. 접속 후 설정 탭에서 변경할 수 있습니다.</p>
+        </div>
+
+        <label class="checkbox-inline">
+          <input id="remember-login" type="checkbox" checked />
+          <span>이 기기에서 로그인 유지 (교문지도 중 재입력 방지)</span>
+        </label>
+
+        <p id="login-error" class="error-text" role="alert" hidden></p>
+
+        <button type="submit" class="btn btn-primary btn-lg btn-block">
+          교문지도 시작하기
+        </button>
+      </form>
+
+      <div class="login-footer">
+        <button type="button" id="open-setup-guide-btn" class="text-btn">
+          Firebase 연동 및 GitHub 배포 안내
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- 메인 앱 화면 -->
+  <div id="app-shell" class="app-shell" hidden>
+    <!-- 상단 헤더 -->
+    <header class="app-header">
+      <div class="header-top">
+        <div class="header-title-wrap">
+          <h1 id="header-school-name" class="header-title">교문지도 실시간 체크</h1>
+          <div class="header-meta">
+            <button type="button" id="sync-status-btn" class="sync-pill" title="실시간 연동 상태 확인">
+              <span class="status-dot" id="header-sync-dot"></span>
+              <span id="header-sync-text">연결 중</span>
+            </button>
+            <span class="teacher-pill" id="header-teacher-name">교사</span>
+          </div>
+        </div>
+        <div class="header-actions">
+          <div class="live-clock-box" aria-live="off">
+            <span id="live-clock" class="live-clock">08:00:00</span>
+            <span id="late-threshold-badge" class="late-badge">지각 기준 08:30</span>
+          </div>
+          <button type="button" id="logout-btn" class="icon-btn" aria-label="교사 전환 / 로그아웃" title="교사 전환 / 로그아웃">
+            <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/>
+              <polyline points="16 17 21 12 16 7"/>
+              <line x1="21" y1="12" x2="9" y2="12"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 데모/미연동 안내 배너 -->
+      <div id="demo-banner" class="demo-banner" hidden>
+        <span>현재 <strong>로컬 체험 모드</strong>입니다. 여러 기기 실시간 연동을 위해 <code>js/firebase-config.js</code>에 Firebase 설정을 입력하세요.</span>
+        <button type="button" id="demo-guide-btn" class="btn btn-xs btn-outline-light">연동 방법</button>
+      </div>
+
+      <!-- 날짜 바 & 실시간 요약 카운터 -->
+      <div class="summary-strip">
+        <label class="date-selector" aria-label="조회 날짜 선택">
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"/>
+            <line x1="16" y1="2" x2="16" y2="6"/>
+            <line x1="8" y1="2" x2="8" y2="6"/>
+            <line x1="3" y1="10" x2="21" y2="10"/>
+          </svg>
+          <input type="date" id="active-date-input" />
+        </label>
+
+        <div class="stat-pills">
+          <div class="stat-pill">
+            <span class="stat-label">등교</span>
+            <strong id="stat-present" class="stat-value text-success">0</strong>
+            <span class="stat-sub">/ <span id="stat-total">0</span></span>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-label">미등교</span>
+            <strong id="stat-absent" class="stat-value text-muted">0</strong>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-label">지각</span>
+            <strong id="stat-late" class="stat-value text-danger">0</strong>
+          </div>
+          <div class="stat-pill">
+            <span class="stat-label">생활지도</span>
+            <strong id="stat-guidance" class="stat-value text-warning">0</strong>
+          </div>
+        </div>
+      </div>
+    </header>
+
+    <!-- 메인 콘텐츠 -->
+    <main class="app-main">
+      <!-- 탭 1: 빠른 교문지도 -->
+      <section id="tab-gate" class="tab-panel active" aria-label="빠른 교문지도">
+        <div class="panel-grid">
+          <div class="card search-card">
+            <div class="card-header">
+              <h2>학생 빠른 검색 · 즉시 체크</h2>
+              <span class="badge-soft">학번 · 이름 · 초성(ㄱㅁㅅ)</span>
+            </div>
+
+            <div class="search-input-wrap">
+              <svg class="search-icon" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
+                <circle cx="11" cy="11" r="8"/>
+                <line x1="21" y1="21" x2="16.65" y2="16.65"/>
+              </svg>
+              <input
+                id="gate-search-input"
+                type="search"
+                placeholder="학번(10101), 이름(김민수), 초성(ㄱㅁㅅ) 입력..."
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <button type="button" id="gate-search-clear" class="clear-btn" aria-label="검색어 지우기" hidden>&times;</button>
+            </div>
+
+            <!-- 빠른 학년 필터 -->
+            <div id="gate-grade-filters" class="filter-chips" role="group" aria-label="학년 필터"></div>
+
+            <!-- 학생 미등록 안내 -->
+            <div id="empty-roster-notice" class="empty-state" hidden>
+              <p><strong>등록된 학생 명단이 없습니다.</strong></p>
+              <p>엑셀/CSV 명단을 업로드하거나 샘플 명단(30명)으로 바로 테스트해 보세요.</p>
+              <div class="btn-row-center">
+                <button type="button" id="quick-load-sample-btn" class="btn btn-primary">샘플 명단(30명) 불러오기</button>
+                <button type="button" id="go-roster-tab-btn" class="btn btn-secondary">명단 업로드로 이동</button>
+              </div>
+            </div>
+
+            <!-- 검색 결과 리스트 -->
+            <ul id="gate-student-list" class="student-list" aria-live="polite"></ul>
+          </div>
+
+          <!-- 실시간 교문지도 피드 -->
+          <div class="card feed-card">
+            <div class="card-header">
+              <h2>실시간 지도 현황</h2>
+              <span id="feed-count-badge" class="badge-soft">0건</span>
+            </div>
+            <ul id="live-feed-list" class="feed-list" aria-live="polite"></ul>
+          </div>
+        </div>
+      </section>
+
+      <!-- 탭 2: 등교 출석 / 미등교 현황 -->
+      <section id="tab-attendance" class="tab-panel" aria-label="등교 출석 현황" hidden>
+        <div class="card">
+          <div class="card-header wrap-header">
+            <div>
+              <h2>등교 출석 · 미등교 확인</h2>
+              <p class="card-desc">학생 카드를 누르면 등교 출석이 토글되며, 지각·생활지도도 바로 기록할 수 있습니다.</p>
+            </div>
+            <div class="header-btn-group">
+              <button type="button" id="copy-absent-btn" class="btn btn-secondary btn-sm">미등교 명단 복사</button>
+              <button type="button" id="mark-class-present-btn" class="btn btn-outline btn-sm">현재 반 전체 등교</button>
+            </div>
+          </div>
+
+          <div class="attendance-controls">
+            <div id="att-grade-chips" class="filter-chips" role="group" aria-label="학년 선택"></div>
+            <div id="att-class-chips" class="filter-chips" role="group" aria-label="반 선택"></div>
+            <div class="status-filter-row" role="group" aria-label="출석 상태 필터">
+              <button type="button" class="chip active" data-att-status="all">전체</button>
+              <button type="button" class="chip" data-att-status="absent">미등교만</button>
+              <button type="button" class="chip" data-att-status="present">등교 완료</button>
+              <button type="button" class="chip" data-att-status="late">지각</button>
+              <button type="button" class="chip" data-att-status="guided">지도 대상</button>
+            </div>
+          </div>
+
+          <div id="attendance-progress-wrap" class="progress-wrap">
+            <div class="progress-meta">
+              <span id="attendance-progress-label">등교율 0%</span>
+              <span id="attendance-progress-count">0 / 0명</span>
+            </div>
+            <div class="progress-track">
+              <div id="attendance-progress-bar" class="progress-bar" style="width: 0%"></div>
+            </div>
+          </div>
+
+          <div id="attendance-grid" class="attendance-grid" aria-live="polite"></div>
+        </div>
+      </section>
+
+      <!-- 탭 3: 기록 조회 · 통계 · 내보내기 -->
+      <section id="tab-records" class="tab-panel" aria-label="기록 및 통계" hidden>
+        <div class="stats-grid">
+          <div class="card">
+            <div class="card-header">
+              <h2>항목별 지도 통계</h2>
+              <span id="stats-date-label" class="badge-soft">오늘</span>
+            </div>
+            <div id="item-stats-bars" class="bar-chart"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2>학년·반별 지각/지도 현황</h2>
+            </div>
+            <div id="class-stats-list" class="mini-stat-list"></div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header wrap-header">
+            <div>
+              <h2>상세 지도 기록</h2>
+              <p class="card-desc">선택한 날짜의 지각 및 생활규정 지도 내역이 실시간으로 집계됩니다.</p>
+            </div>
+            <div class="header-btn-group">
+              <button type="button" id="export-records-csv-btn" class="btn btn-primary btn-sm">지도기록 CSV 다운로드</button>
+              <button type="button" id="export-attendance-csv-btn" class="btn btn-secondary btn-sm">출석현황 CSV 다운로드</button>
+            </div>
+          </div>
+
+          <div class="record-filter-bar">
+            <select id="record-type-filter" aria-label="기록 유형 필터">
+              <option value="all">전체 유형</option>
+              <option value="late">지각만</option>
+              <option value="guidance">생활규정 지도만</option>
+            </select>
+            <input id="record-search-input" type="search" placeholder="학생 이름, 학번, 교사, 항목 검색..." />
+          </div>
+
+          <div class="table-responsive">
+            <table class="data-table">
+              <thead>
+                <tr>
+                  <th>시각</th>
+                  <th>학번</th>
+                  <th>이름</th>
+                  <th>유형</th>
+                  <th>지도 항목 / 메모</th>
+                  <th>담당 교사</th>
+                  <th>관리</th>
+                </tr>
+              </thead>
+              <tbody id="records-table-body"></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 탭 4: 명단 관리 & 설정 -->
+      <section id="tab-settings" class="tab-panel" aria-label="명단 및 설정 관리" hidden>
+        <div class="settings-grid">
+          <!-- 엑셀/CSV 명단 업로드 -->
+          <div class="card">
+            <div class="card-header">
+              <h2>학생 명단 일괄 업로드 (엑셀 / CSV)</h2>
+              <span id="roster-total-badge" class="badge-soft">0명</span>
+            </div>
+            <p class="card-desc">
+              <code>학번, 학년, 반, 번호, 이름</code> (또는 <code>학번, 이름</code>) 열이 포함된 <code>.xlsx</code>, <code>.xls</code>, <code>.csv</code> 파일을 업로드하면 모든 교사 기기에 즉시 동기화됩니다.
+            </p>
+
+            <div class="upload-dropzone" id="roster-dropzone">
+              <input type="file" id="roster-file-input" accept=".xlsx,.xls,.csv" hidden />
+              <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="17 8 12 3 7 8"/>
+                <line x1="12" y1="3" x2="12" y2="15"/>
+              </svg>
+              <p><strong>엑셀 또는 CSV 파일 선택</strong> (또는 여기로 드래그)</p>
+              <span class="upload-sub">UTF-8 / EUC-KR CSV 및 Excel(.xlsx) 자동 인식</span>
+            </div>
+
+            <div id="upload-preview-box" class="upload-preview" hidden>
+              <div class="preview-header">
+                <strong id="upload-preview-summary">0명 인식됨</strong>
+                <div class="radio-inline-group">
+                  <label><input type="radio" name="importMode" value="replace" checked /> 기존 명단 교체</label>
+                  <label><input type="radio" name="importMode" value="merge" /> 기존 명단에 추가/병합</label>
+                </div>
+              </div>
+              <div id="upload-preview-sample" class="preview-sample"></div>
+              <div class="btn-row">
+                <button type="button" id="confirm-upload-btn" class="btn btn-primary btn-sm">명단 저장 및 동기화</button>
+                <button type="button" id="cancel-upload-btn" class="btn btn-secondary btn-sm">취소</button>
+              </div>
+            </div>
+
+            <div class="btn-row mt-12">
+              <button type="button" id="download-sample-csv-btn" class="btn btn-outline btn-sm">샘플 CSV 양식 받기</button>
+              <button type="button" id="load-sample-roster-btn" class="btn btn-secondary btn-sm">테스트용 샘플 30명 넣기</button>
+              <button type="button" id="clear-roster-btn" class="btn btn-danger-outline btn-sm">명단 전체 삭제</button>
+            </div>
+
+            <hr class="divider" />
+
+            <h3 class="sub-heading">학생 개별 추가</h3>
+            <form id="add-student-form" class="inline-form">
+              <input id="new-student-id" type="text" placeholder="학번 (예: 10101)" required maxlength="10" />
+              <input id="new-student-name" type="text" placeholder="이름 (예: 김민수)" required maxlength="20" />
+              <button type="submit" class="btn btn-primary btn-sm">추가</button>
+            </form>
+            <p class="form-hint">5자리 학번(예: 10215 → 1학년 2반 15번) 또는 4자리 학번(1205 → 1학년 2반 5번)을 입력하면 학년·반·번호가 자동 분리됩니다.</p>
+          </div>
+
+          <!-- 학교 설정 & 지도 항목 관리 -->
+          <div class="card">
+            <div class="card-header">
+              <h2>학교 · 지각 기준 · 보안 설정</h2>
+            </div>
+
+            <form id="school-settings-form" class="stack-form">
+              <div class="form-group">
+                <label for="setting-school-name">학교 / 앱 이름</label>
+                <input id="setting-school-name" type="text" placeholder="예: OO고등학교 교문지도" maxlength="40" required />
+              </div>
+
+              <div class="form-group">
+                <label for="setting-late-time">등교 지각 기준 시각</label>
+                <input id="setting-late-time" type="time" required />
+              </div>
+
+              <div class="form-group">
+                <label for="setting-new-pin">교사 접속 PIN 변경 (변경 시에만 입력)</label>
+                <input id="setting-new-pin" type="password" inputmode="numeric" placeholder="새 PIN 입력 (4~12자리)" maxlength="12" />
+              </div>
+
+              <button type="submit" class="btn btn-primary">설정 저장 (실시간 반영)</button>
+            </form>
+
+            <hr class="divider" />
+
+            <h3 class="sub-heading">생활규정 지도 항목 관리</h3>
+            <p class="form-hint">교문에서 체크할 복장·두발·명찰 등의 항목을 자유롭게 추가/삭제할 수 있습니다.</p>
+            <div id="settings-guidance-items" class="tag-manage-list"></div>
+
+            <form id="add-guidance-item-form" class="inline-form mt-12">
+              <input id="new-item-label" type="text" placeholder="새 지도 항목 (예: 체육복 등교)" maxlength="20" required />
+              <button type="submit" class="btn btn-secondary btn-sm">항목 추가</button>
+            </form>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- 하단 모바일 네비게이션 -->
+    <nav class="bottom-nav" aria-label="주요 메뉴">
+      <button type="button" class="nav-item active" data-tab="gate" aria-current="page">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+        <span>교문지도</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="attendance">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/>
+          <circle cx="9" cy="7" r="4"/>
+          <polyline points="16 11 18 13 22 9"/>
+        </svg>
+        <span>등교출석</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="records">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <line x1="18" y1="20" x2="18" y2="10"/>
+          <line x1="12" y1="20" x2="12" y2="4"/>
+          <line x1="6" y1="20" x2="6" y2="14"/>
+        </svg>
+        <span>기록·통계</span>
+      </button>
+      <button type="button" class="nav-item" data-tab="settings">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+        <span>명단·설정</span>
+      </button>
+    </nav>
+  </div>
+
+  <!-- 생활규정 지도 체크 모달 (Native Dialog) -->
+  <dialog id="guidance-modal" class="modal-dialog" aria-labelledby="guidance-modal-title">
+    <form id="guidance-modal-form" method="dialog" class="modal-content">
+      <div class="modal-header">
+        <div>
+          <h2 id="guidance-modal-title">생활규정 지도 체크</h2>
+          <p id="guidance-modal-student" class="modal-subtitle"></p>
+        </div>
+        <button type="button" class="icon-btn modal-close-btn" data-close-dialog="guidance-modal" aria-label="닫기">&times;</button>
+      </div>
+
+      <div class="modal-body">
+        <div class="form-group">
+          <label class="checkbox-card">
+            <input type="checkbox" id="modal-include-late" />
+            <span>
+              <strong>지각 함께 체크</strong>
+              <small>현재 시각으로 지각 및 등교 출석이 자동 기록됩니다.</small>
+            </span>
+          </label>
+        </div>
+
+        <div class="form-group">
+          <label>지도 항목 선택 (복수 선택 가능)</label>
+          <div id="modal-guidance-chips" class="selectable-chips"></div>
+        </div>
+
+        <div class="form-group">
+          <label for="modal-guidance-memo">지도 메모 (선택)</label>
+          <input id="modal-guidance-memo" type="text" placeholder="예: 내일까지 명찰 지참, 사유 확인 등" maxlength="100" />
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-close-dialog="guidance-modal">취소</button>
+        <button type="submit" class="btn btn-primary">실시간 저장</button>
+      </div>
+    </form>
+  </dialog>
+
+  <!-- Firebase 연동 및 GitHub 배포 안내 모달 -->
+  <dialog id="setup-guide-modal" class="modal-dialog" aria-labelledby="setup-guide-title">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h2 id="setup-guide-title">Firebase 실시간 연동 &amp; GitHub Pages 배포</h2>
+        <button type="button" class="icon-btn modal-close-btn" data-close-dialog="setup-guide-modal" aria-label="닫기">&times;</button>
+      </div>
+      <div class="modal-body guide-body">
+        <div class="guide-step">
+          <span class="step-num">1</span>
+          <div>
+            <h3>Firebase Realtime Database 생성</h3>
+            <p>Firebase Console에서 프로젝트를 만들고 <strong>Realtime Database</strong>를 생성하세요. (리전: 싱가포르 권장)</p>
+          </div>
+        </div>
+        <div class="guide-step">
+          <span class="step-num">2</span>
+          <div>
+            <h3>웹 앱 설정값 붙여넣기</h3>
+            <p>프로젝트 설정 &gt; 내 앱(웹)에서 발급받은 <code>firebaseConfig</code> 값을 <code>js/firebase-config.js</code> 파일에 입력합니다.</p>
+          </div>
+        </div>
+        <div class="guide-step">
+          <span class="step-num">3</span>
+          <div>
+            <h3>GitHub Pages 활성화</h3>
+            <p>이 폴더를 GitHub 저장소에 올린 뒤 <strong>Settings &gt; Pages &gt; Branch: main</strong>으로 설정하면 즉시 웹앱 주소가 생성됩니다. 이후 코드를 수정해 푸시할 때마다 자동 반영됩니다.</p>
+          </div>
+        </div>
+        <p class="guide-note">상세한 단계별 가이드는 저장소의 <code>README.md</code>와 <code>firebase/database.rules.json</code> 파일을 참고해 주세요.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-primary" data-close-dialog="setup-guide-modal">확인</button>
+      </div>
+    </div>
+  </dialog>
+
+  <!-- 토스트 알림 -->
+  <div id="toast-container" class="toast-container" role="status" aria-live="polite"></div>
+
+  <!-- SheetJS (엑셀 .xlsx/.xls 파싱용, 실패해도 CSV는 내장 파서로 동작) -->
+  <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>

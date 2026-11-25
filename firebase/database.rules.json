@@ -1,0 +1,29 @@
+{
+  "rules": {
+    ".read": "auth != null",
+    ".write": "auth != null",
+    "settings": {
+      ".validate": "newData.hasChildren(['schoolName']) || newData.exists()"
+    },
+    "students": {
+      "$studentId": {
+        ".validate": "newData.hasChildren(['id', 'name']) && newData.child('name').isString() && newData.child('name').val().length <= 40"
+      }
+    },
+    "daily": {
+      "$date": {
+        ".validate": "$date.matches(/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/)",
+        "attendance": {
+          "$studentId": {
+            ".validate": "newData.hasChildren(['status', 'time', 'teacher'])"
+          }
+        },
+        "records": {
+          "$recordId": {
+            ".validate": "newData.hasChildren(['studentId', 'studentName', 'time', 'teacher'])"
+          }
+        }
+      }
+    }
+  }
+}

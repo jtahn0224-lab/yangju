@@ -1,0 +1,1403 @@
+/**
+ * ============================================================
+ * 교문지도 실시간 웹앱 - 메인 UI 컨트롤러
+ * ============================================================
+ */
+
+import { GateDatabase, hashPin } from "./db.js";
+import { matchStudent, parseStudentId } from "./hangul.js";
+import {
+  getSampleStudentsMap,
+  downloadCsv,
+  downloadSampleRosterCsv,
+  parseRosterFile
+} from "./roster.js";
+
+const SESSION_KEY = "gate_teacher_session_v1";
+const RECENT_TEACHERS_KEY = "gate_recent_teachers_v1";
+
+const db = new GateDatabase();
+
+const state = {
+  teacherName: "",
+  connection: { mode: "demo", connected: false },
+  settings: {
+    schoolName: "OO학교 교문지도",
+    lateTime: "08:30",
+    pinHash: null,
+    guidanceItems: []
+  },
+  studentsMap: {},
+  studentsList: [],
+  activeDate: getTodayDateString(),
+  daily: {
+    attendance: {},
+    records: {}
+  },
+  activeTab: "gate",
+  gateSearch: "",
+  gateGradeFilter: "all",
+  attGradeFilter: "all",
+  attClassFilter: "all",
+  attStatusFilter: "all",
+  recordTypeFilter: "all",
+  recordSearch: "",
+  pendingUpload: null,
+  modalStudentId: null
+};
+
+// DOM 참조 캐싱
+const el = {
+  loginScreen: document.getElementById("login-screen"),
+  loginSyncDot: document.getElementById("login-sync-dot"),
+  loginSyncLabel: document.getElementById("login-sync-label"),
+  loginSchoolName: document.getElementById("login-school-name"),
+  loginForm: document.getElementById("login-form"),
+  teacherNameInput: document.getElementById("teacher-name-input"),
+  recentTeachers: document.getElementById("recent-teachers"),
+  pinInput: document.getElementById("pin-input"),
+  loginPinHint: document.getElementById("login-pin-hint"),
+  rememberLogin: document.getElementById("remember-login"),
+  loginError: document.getElementById("login-error"),
+  openSetupGuideBtn: document.getElementById("open-setup-guide-btn"),
+
+  appShell: document.getElementById("app-shell"),
+  headerSchoolName: document.getElementById("header-school-name"),
+  syncStatusBtn: document.getElementById("sync-status-btn"),
+  headerSyncDot: document.getElementById("header-sync-dot"),
+  headerSyncText: document.getElementById("header-sync-text"),
+  headerTeacherName: document.getElementById("header-teacher-name"),
+  liveClock: document.getElementById("live-clock"),
+  lateThresholdBadge: document.getElementById("late-threshold-badge"),
+  logoutBtn: document.getElementById("logout-btn"),
+  demoBanner: document.getElementById("demo-banner"),
+  demoGuideBtn: document.getElementById("demo-guide-btn"),
+
+  activeDateInput: document.getElementById("active-date-input"),
+  statPresent: document.getElementById("stat-present"),
+  statTotal: document.getElementById("stat-total"),
+  statAbsent: document.getElementById("stat-absent"),
+  statLate: document.getElementById("stat-late"),
+  statGuidance: document.getElementById("stat-guidance"),
+
+  // 탭 1: 빠른 교문지도
+  gateSearchInput: document.getElementById("gate-search-input"),
+  gateSearchClear: document.getElementById("gate-search-clear"),
+  gateGradeFilters: document.getElementById("gate-grade-filters"),
+  emptyRosterNotice: document.getElementById("empty-roster-notice"),
+  quickLoadSampleBtn: document.getElementById("quick-load-sample-btn"),
+  goRosterTabBtn: document.getElementById("go-roster-tab-btn"),
+  gateStudentList: document.getElementById("gate-student-list"),
+  feedCountBadge: document.getElementById("feed-count-badge"),
+  liveFeedList: document.getElementById("live-feed-list"),
+
+  // 탭 2: 등교 출석
+  copyAbsentBtn: document.getElementById("copy-absent-btn"),
+  markClassPresentBtn: document.getElementById("mark-class-present-btn"),
+  attGradeChips: document.getElementById("att-grade-chips"),
+  attClassChips: document.getElementById("att-class-chips"),
+  attendanceProgressLabel: document.getElementById("attendance-progress-label"),
+  attendanceProgressCount: document.getElementById("attendance-progress-count"),
+  attendanceProgressBar: document.getElementById("attendance-progress-bar"),
+  attendanceGrid: document.getElementById("attendance-grid"),
+
+  // 탭 3: 기록·통계
+  statsDateLabel: document.getElementById("stats-date-label"),
+  itemStatsBars: document.getElementById("item-stats-bars"),
+  classStatsList: document.getElementById("class-stats-list"),
+  exportRecordsCsvBtn: document.getElementById("export-records-csv-btn"),
+  exportAttendanceCsvBtn: document.getElementById("export-attendance-csv-btn"),
+  recordTypeFilter: document.getElementById("record-type-filter"),
+  recordSearchInput: document.getElementById("record-search-input"),
+  recordsTableBody: document.getElementById("records-table-body"),
+
+  // 탭 4: 명단·설정
+  rosterTotalBadge: document.getElementById("roster-total-badge"),
+  rosterDropzone: document.getElementById("roster-dropzone"),
+  rosterFileInput: document.getElementById("roster-file-input"),
+  uploadPreviewBox: document.getElementById("upload-preview-box"),
+  uploadPreviewSummary: document.getElementById("upload-preview-summary"),
+  uploadPreviewSample: document.getElementById("upload-preview-sample"),
+  confirmUploadBtn: document.getElementById("confirm-upload-btn"),
+  cancelUploadBtn: document.getElementById("cancel-upload-btn"),
+  downloadSampleCsvBtn: document.getElementById("download-sample-csv-btn"),
+  loadSampleRosterBtn: document.getElementById("load-sample-roster-btn"),
+  clearRosterBtn: document.getElementById("clear-roster-btn"),
+  addStudentForm: document.getElementById("add-student-form"),
+  newStudentId: document.getElementById("new-student-id"),
+  newStudentName: document.getElementById("new-student-name"),
+
+  schoolSettingsForm: document.getElementById("school-settings-form"),
+  settingSchoolName: document.getElementById("setting-school-name"),
+  settingLateTime: document.getElementById("setting-late-time"),
+  settingNewPin: document.getElementById("setting-new-pin"),
+  settingsGuidanceItems: document.getElementById("settings-guidance-items"),
+  addGuidanceItemForm: document.getElementById("add-guidance-item-form"),
+  newItemLabel: document.getElementById("new-item-label"),
+
+  // 모달 & 토스트
+  guidanceModal: document.getElementById("guidance-modal"),
+  guidanceModalForm: document.getElementById("guidance-modal-form"),
+  guidanceModalStudent: document.getElementById("guidance-modal-student"),
+  modalIncludeLate: document.getElementById("modal-include-late"),
+  modalGuidanceChips: document.getElementById("modal-guidance-chips"),
+  modalGuidanceMemo: document.getElementById("modal-guidance-memo"),
+  setupGuideModal: document.getElementById("setup-guide-modal"),
+  toastContainer: document.getElementById("toast-container")
+};
+
+/* ============================================================
+   유틸리티 함수
+   ============================================================ */
+
+function escapeHtml(str) {
+  return String(str ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+}
+
+function getTodayDateString() {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+function getCurrentTimeString() {
+  const d = new Date();
+  return [
+    String(d.getHours()).padStart(2, "0"),
+    String(d.getMinutes()).padStart(2, "0"),
+    String(d.getSeconds()).padStart(2, "0")
+  ].join(":");
+}
+
+function isPastLateThreshold() {
+  const lateTime = state.settings.lateTime || "08:30";
+  const [h, m] = lateTime.split(":").map(Number);
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  return nowMins > h * 60 + m;
+}
+
+function showToast(message, type = "default") {
+  const toast = document.createElement("div");
+  toast.className = `toast ${type}`;
+  toast.textContent = message;
+  el.toastContainer.appendChild(toast);
+  setTimeout(() => {
+    toast.remove();
+  }, 2600);
+}
+
+function getSortedRecords() {
+  const entries = Object.entries(state.daily.records || {}).map(([id, rec]) => ({
+    id,
+    ...rec
+  }));
+  entries.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+  return entries;
+}
+
+function getStudentRecordsMap() {
+  const map = new Map();
+  for (const rec of getSortedRecords()) {
+    if (!map.has(rec.studentId)) map.set(rec.studentId, []);
+    map.get(rec.studentId).push(rec);
+  }
+  return map;
+}
+
+function sortStudents(studentsMap) {
+  return Object.values(studentsMap || {}).sort((a, b) => {
+    if (a.grade !== b.grade) return a.grade - b.grade;
+    if (a.classNum !== b.classNum) return a.classNum - b.classNum;
+    if (a.number !== b.number) return a.number - b.number;
+    return String(a.id).localeCompare(String(b.id));
+  });
+}
+
+/* ============================================================
+   교사 접속 / 세션 관리
+   ============================================================ */
+
+function loadSavedSession() {
+  try {
+    const raw = localStorage.getItem(SESSION_KEY) || sessionStorage.getItem(SESSION_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (parsed && parsed.teacherName) return parsed;
+  } catch {
+    // ignore
+  }
+  return null;
+}
+
+function saveSession(teacherName, remember) {
+  const payload = JSON.stringify({ teacherName, loggedInAt: Date.now() });
+  sessionStorage.setItem(SESSION_KEY, payload);
+  if (remember) {
+    localStorage.setItem(SESSION_KEY, payload);
+  } else {
+    localStorage.removeItem(SESSION_KEY);
+  }
+  saveRecentTeacher(teacherName);
+}
+
+function clearSession() {
+  localStorage.removeItem(SESSION_KEY);
+  sessionStorage.removeItem(SESSION_KEY);
+}
+
+function getRecentTeachers() {
+  try {
+    const raw = localStorage.getItem(RECENT_TEACHERS_KEY);
+    const list = raw ? JSON.parse(raw) : [];
+    return Array.isArray(list) ? list : [];
+  } catch {
+    return [];
+  }
+}
+
+function saveRecentTeacher(name) {
+  const list = getRecentTeachers().filter((t) => t !== name);
+  list.unshift(name);
+  localStorage.setItem(RECENT_TEACHERS_KEY, JSON.stringify(list.slice(0, 6)));
+}
+
+function renderRecentTeachers() {
+  const list = getRecentTeachers();
+  if (list.length === 0) {
+    el.recentTeachers.innerHTML = "";
+    return;
+  }
+  el.recentTeachers.innerHTML = list
+    .map((name) => `<button type="button" class="chip" data-recent-teacher="${escapeHtml(name)}">${escapeHtml(name)}</button>`)
+    .join("");
+}
+
+function enterApp(teacherName) {
+  state.teacherName = teacherName;
+  el.headerTeacherName.textContent = `${teacherName} 선생님`;
+  el.loginScreen.hidden = true;
+  el.appShell.hidden = false;
+  renderAll();
+}
+
+function exitApp() {
+  clearSession();
+  state.teacherName = "";
+  el.appShell.hidden = true;
+  el.loginScreen.hidden = false;
+  el.pinInput.value = "";
+  el.loginError.hidden = true;
+  renderRecentTeachers();
+}
+
+/* ============================================================
+   실시간 시계 & 연결 상태 표시
+   ============================================================ */
+
+function updateClock() {
+  const nowStr = getCurrentTimeString();
+  el.liveClock.textContent = nowStr;
+
+  const lateTime = state.settings.lateTime || "08:30";
+  const isLateNow = isPastLateThreshold();
+  el.lateThresholdBadge.textContent = isLateNow
+    ? `지각 시간대 (기준 ${lateTime})`
+    : `지각 기준 ${lateTime}`;
+  el.lateThresholdBadge.classList.toggle("is-late-time", isLateNow);
+}
+
+function renderConnectionStatus() {
+  const { mode, connected } = state.connection;
+  let dotClass = "demo";
+  let text = "로컬 체험 모드";
+
+  if (mode === "firebase") {
+    if (connected) {
+      dotClass = "online";
+      text = "Firebase 실시간 동기화";
+    } else {
+      dotClass = "offline";
+      text = "오프라인 (재연결 중)";
+    }
+  }
+
+  el.loginSyncDot.className = `status-dot ${dotClass}`;
+  el.loginSyncLabel.textContent = text;
+  el.headerSyncDot.className = `status-dot ${dotClass}`;
+  el.headerSyncText.textContent = mode === "firebase" ? (connected ? "실시간 동기화" : "재연결 중") : "로컬 체험";
+  el.demoBanner.hidden = mode === "firebase";
+}
+
+/* ============================================================
+   렌더링 함수
+   ============================================================ */
+
+function renderSettingsUI() {
+  const s = state.settings;
+  document.title = `${s.schoolName} | 실시간 교문지도`;
+  el.loginSchoolName.textContent = s.schoolName;
+  el.headerSchoolName.textContent = s.schoolName;
+  el.settingSchoolName.value = s.schoolName;
+  el.settingLateTime.value = s.lateTime;
+
+  if (s.pinHash) {
+    el.loginPinHint.textContent = "학교에서 설정한 교사 접속 PIN을 입력해 주세요.";
+  } else {
+    el.loginPinHint.innerHTML = '초기 기본 PIN은 <strong>1234</strong>입니다. 접속 후 설정 탭에서 변경할 수 있습니다.';
+  }
+
+  el.settingsGuidanceItems.innerHTML = (s.guidanceItems || [])
+    .map(
+      (item, idx) => `
+      <span class="manage-tag">
+        ${escapeHtml(item)}
+        <button type="button" data-remove-item-idx="${idx}" aria-label="${escapeHtml(item)} 삭제">&times;</button>
+      </span>
+    `
+    )
+    .join("");
+
+  updateClock();
+}
+
+function renderSummaryCounters() {
+  const total = state.studentsList.length;
+  const attendance = state.daily.attendance || {};
+  const records = getSortedRecords();
+
+  let presentCount = 0;
+  let lateCount = 0;
+  for (const stu of state.studentsList) {
+    const att = attendance[stu.id];
+    if (att) {
+      presentCount++;
+      if (att.late || att.status === "late") lateCount++;
+    }
+  }
+  const absentCount = Math.max(0, total - presentCount);
+  const guidanceCount = records.filter((r) => r.type === "guidance" || (Array.isArray(r.items) && r.items.length > 0)).length;
+
+  el.statTotal.textContent = String(total);
+  el.statPresent.textContent = String(presentCount);
+  el.statAbsent.textContent = String(absentCount);
+  el.statLate.textContent = String(lateCount);
+  el.statGuidance.textContent = String(guidanceCount);
+  el.rosterTotalBadge.textContent = `${total}명`;
+}
+
+function renderGradeFilters(container, currentGrade, attrName) {
+  const grades = [...new Set(state.studentsList.map((s) => s.grade))].sort((a, b) => a - b);
+  if (grades.length === 0) {
+    container.innerHTML = "";
+    return;
+  }
+  const chips = [
+    `<button type="button" class="chip ${currentGrade === "all" ? "active" : ""}" ${attrName}="all">전체 학년</button>`,
+    ...grades.map(
+      (g) => `<button type="button" class="chip ${String(currentGrade) === String(g) ? "active" : ""}" ${attrName}="${g}">${g}학년</button>`
+    )
+  ];
+  container.innerHTML = chips.join("");
+}
+
+function renderGateTab() {
+  const hasStudents = state.studentsList.length > 0;
+  el.emptyRosterNotice.hidden = hasStudents;
+  renderGradeFilters(el.gateGradeFilters, state.gateGradeFilter, "data-gate-grade");
+
+  if (!hasStudents) {
+    el.gateStudentList.innerHTML = "";
+    renderLiveFeed();
+    return;
+  }
+
+  const attendance = state.daily.attendance || {};
+  const studentRecs = getStudentRecordsMap();
+
+  const filtered = state.studentsList.filter((stu) => {
+    if (state.gateGradeFilter !== "all" && String(stu.grade) !== String(state.gateGradeFilter)) {
+      return false;
+    }
+    return matchStudent(stu, state.gateSearch);
+  });
+
+  if (filtered.length === 0) {
+    el.gateStudentList.innerHTML = `<li class="empty-state">검색 조건에 맞는 학생이 없습니다.</li>`;
+  } else {
+    const visible = filtered.slice(0, 60);
+    el.gateStudentList.innerHTML = visible
+      .map((stu) => {
+        const att = attendance[stu.id];
+        const recs = studentRecs.get(stu.id) || [];
+        const isLate = Boolean(att?.late || att?.status === "late");
+        const isPresent = Boolean(att);
+        const guidanceTags = recs.flatMap((r) => r.items || []);
+
+        const rowClass = isLate ? "is-late" : isPresent ? "is-present" : "";
+
+        const statusPills = [];
+        if (isLate) {
+          statusPills.push(`<span class="pill-mini pill-late">지각 ${escapeHtml(att.time || "")}</span>`);
+        } else if (isPresent) {
+          statusPills.push(`<span class="pill-mini pill-present">등교 ${escapeHtml(att.time || "")}</span>`);
+        } else {
+          statusPills.push(`<span>미등교</span>`);
+        }
+        if (guidanceTags.length > 0) {
+          const uniq = [...new Set(guidanceTags)];
+          statusPills.push(`<span class="pill-mini pill-guidance">${escapeHtml(uniq.join(", "))}</span>`);
+        }
+
+        return `
+          <li class="student-row ${rowClass}" data-student-id="${escapeHtml(stu.id)}">
+            <div class="student-info">
+              <div class="student-title">
+                <span class="student-id-badge">${escapeHtml(stu.id)}</span>
+                <span class="student-name">${escapeHtml(stu.name)}</span>
+                <span class="text-muted" style="font-size:0.8rem">${stu.grade}학년 ${stu.classNum}반 ${stu.number}번</span>
+              </div>
+              <div class="student-meta">${statusPills.join("")}</div>
+            </div>
+            <div class="quick-actions">
+              <button type="button" class="action-btn present-btn ${isPresent && !isLate ? "active" : ""}" data-action="present" data-id="${escapeHtml(stu.id)}">
+                ${isPresent && !isLate ? "등교됨" : "등교"}
+              </button>
+              <button type="button" class="action-btn late-btn ${isLate ? "active" : ""}" data-action="late" data-id="${escapeHtml(stu.id)}">
+                지각
+              </button>
+              <button type="button" class="action-btn guide-btn" data-action="guide" data-id="${escapeHtml(stu.id)}">
+                지도
+              </button>
+            </div>
+          </li>
+        `;
+      })
+      .join("");
+
+    if (filtered.length > 60) {
+      el.gateStudentList.innerHTML += `<li class="empty-state">상위 60명만 표시됩니다. 학번이나 초성으로 검색 범위를 좁혀주세요. (전체 ${filtered.length}명)</li>`;
+    }
+  }
+
+  renderLiveFeed();
+}
+
+function renderLiveFeed() {
+  const records = getSortedRecords();
+  el.feedCountBadge.textContent = `${records.length}건`;
+
+  if (records.length === 0) {
+    el.liveFeedList.innerHTML = `<li class="empty-state">아직 기록된 지각·생활지도 내역이 없습니다.<br />좌측에서 학생을 검색해 즉시 체크해 보세요.</li>`;
+    return;
+  }
+
+  el.liveFeedList.innerHTML = records
+    .slice(0, 40)
+    .map((rec) => {
+      const tags = [];
+      if (rec.type === "late" || rec.includeLate) {
+        tags.push(`<span class="pill-mini pill-late">지각</span>`);
+      }
+      if (Array.isArray(rec.items)) {
+        for (const item of rec.items) {
+          tags.push(`<span class="pill-mini pill-guidance">${escapeHtml(item)}</span>`);
+        }
+      }
+
+      return `
+        <li class="feed-item">
+          <div class="feed-item-main">
+            <div class="feed-item-top">
+              <span class="student-id-badge">${escapeHtml(rec.studentId)}</span>
+              <strong>${escapeHtml(rec.studentName)}</strong>
+            </div>
+            <div class="feed-tags">${tags.join("")}</div>
+            ${rec.memo ? `<p class="feed-memo">메모: ${escapeHtml(rec.memo)}</p>` : ""}
+            <div class="feed-footer">${escapeHtml(rec.time || "")} · ${escapeHtml(rec.teacher || "")} 선생님</div>
+          </div>
+          <button type="button" class="btn-delete-mini" data-delete-record="${escapeHtml(rec.id)}" title="기록 삭제">취소</button>
+        </li>
+      `;
+    })
+    .join("");
+}
+
+function renderAttendanceTab() {
+  renderGradeFilters(el.attGradeChips, state.attGradeFilter, "data-att-grade");
+
+  // 선택된 학년의 반 목록
+  const classCandidates = state.studentsList.filter(
+    (s) => state.attGradeFilter === "all" || String(s.grade) === String(state.attGradeFilter)
+  );
+  const classes = [...new Set(classCandidates.map((s) => s.classNum))].sort((a, b) => a - b);
+
+  if (state.attClassFilter !== "all" && !classes.includes(Number(state.attClassFilter))) {
+    state.attClassFilter = "all";
+  }
+
+  if (classes.length === 0) {
+    el.attClassChips.innerHTML = "";
+  } else {
+    el.attClassChips.innerHTML = [
+      `<button type="button" class="chip ${state.attClassFilter === "all" ? "active" : ""}" data-att-class="all">전체 반</button>`,
+      ...classes.map(
+        (c) => `<button type="button" class="chip ${String(state.attClassFilter) === String(c) ? "active" : ""}" data-att-class="${c}">${c}반</button>`
+      )
+    ].join("");
+  }
+
+  const attendance = state.daily.attendance || {};
+  const studentRecs = getStudentRecordsMap();
+
+  const scopeStudents = state.studentsList.filter((s) => {
+    if (state.attGradeFilter !== "all" && String(s.grade) !== String(state.attGradeFilter)) return false;
+    if (state.attClassFilter !== "all" && String(s.classNum) !== String(state.attClassFilter)) return false;
+    return true;
+  });
+
+  const presentInScope = scopeStudents.filter((s) => Boolean(attendance[s.id])).length;
+  const pct = scopeStudents.length > 0 ? Math.round((presentInScope / scopeStudents.length) * 100) : 0;
+  el.attendanceProgressLabel.textContent = `등교율 ${pct}%`;
+  el.attendanceProgressCount.textContent = `${presentInScope} / ${scopeStudents.length}명`;
+  el.attendanceProgressBar.style.width = `${pct}%`;
+
+  const visibleStudents = scopeStudents.filter((s) => {
+    const att = attendance[s.id];
+    const recs = studentRecs.get(s.id) || [];
+    if (state.attStatusFilter === "absent") return !att;
+    if (state.attStatusFilter === "present") return Boolean(att);
+    if (state.attStatusFilter === "late") return Boolean(att?.late || att?.status === "late");
+    if (state.attStatusFilter === "guided") return recs.some((r) => Array.isArray(r.items) && r.items.length > 0);
+    return true;
+  });
+
+  if (visibleStudents.length === 0) {
+    el.attendanceGrid.innerHTML = `<div class="empty-state" style="grid-column:1/-1">해당 조건의 학생이 없습니다.</div>`;
+    return;
+  }
+
+  el.attendanceGrid.innerHTML = visibleStudents
+    .map((s) => {
+      const att = attendance[s.id];
+      const recs = studentRecs.get(s.id) || [];
+      const isLate = Boolean(att?.late || att?.status === "late");
+      const isPresent = Boolean(att);
+      const guidedCount = recs.reduce((acc, r) => acc + (r.items?.length || 0), 0);
+
+      const cardClass = isLate ? "status-late" : isPresent ? "status-present" : "";
+      const statusText = isLate
+        ? `지각 ${att.time || ""}`
+        : isPresent
+        ? `등교 ${att.time || ""}`
+        : "미등교";
+
+      return `
+        <div class="att-card ${cardClass}">
+          <div class="att-card-top">
+            <span class="student-id-badge">${escapeHtml(s.id)}</span>
+            ${guidedCount > 0 ? `<span class="pill-mini pill-guidance">지도 ${guidedCount}</span>` : ""}
+          </div>
+          <div class="att-card-name">${escapeHtml(s.name)}</div>
+          <div class="att-card-time">${escapeHtml(statusText)}</div>
+          <div class="att-card-actions">
+            <button type="button" class="action-btn present-btn ${isPresent && !isLate ? "active" : ""}" data-action="present" data-id="${escapeHtml(s.id)}">
+              ${isPresent ? "출석취소" : "등교체크"}
+            </button>
+            <button type="button" class="action-btn guide-btn" data-action="guide" data-id="${escapeHtml(s.id)}">
+              지각·지도
+            </button>
+          </div>
+        </div>
+      `;
+    })
+    .join("");
+}
+
+function renderRecordsTab() {
+  const records = getSortedRecords();
+  el.statsDateLabel.textContent = state.activeDate;
+
+  // 1. 항목별 통계 막대 그래프
+  const counts = new Map();
+  let lateTotal = 0;
+  for (const r of records) {
+    if (r.type === "late" || r.includeLate) lateTotal++;
+    for (const item of r.items || []) {
+      counts.set(item, (counts.get(item) || 0) + 1);
+    }
+  }
+
+  const statEntries = [];
+  if (lateTotal > 0) statEntries.push({ label: "지각", count: lateTotal, isLate: true });
+  for (const [label, count] of [...counts.entries()].sort((a, b) => b[1] - a[1])) {
+    statEntries.push({ label, count, isLate: false });
+  }
+
+  if (statEntries.length === 0) {
+    el.itemStatsBars.innerHTML = `<p class="empty-state">집계된 지도 기록이 없습니다.</p>`;
+  } else {
+    const maxCount = Math.max(...statEntries.map((e) => e.count), 1);
+    el.itemStatsBars.innerHTML = statEntries
+      .map((entry) => {
+        const width = Math.round((entry.count / maxCount) * 100);
+        return `
+          <div class="bar-row">
+            <span class="bar-label" title="${escapeHtml(entry.label)}">${escapeHtml(entry.label)}</span>
+            <div class="bar-track">
+              <div class="bar-fill ${entry.isLate ? "is-late" : ""}" style="width:${width}%"></div>
+            </div>
+            <span class="bar-count">${entry.count}건</span>
+          </div>
+        `;
+      })
+      .join("");
+  }
+
+  // 2. 학년·반별 현황
+  const attendance = state.daily.attendance || {};
+  const classGroups = new Map();
+  for (const s of state.studentsList) {
+    const key = `${s.grade}학년 ${s.classNum}반`;
+    if (!classGroups.has(key)) {
+      classGroups.set(key, { total: 0, present: 0, late: 0, guided: 0 });
+    }
+    const g = classGroups.get(key);
+    g.total++;
+    const att = attendance[s.id];
+    if (att) {
+      g.present++;
+      if (att.late || att.status === "late") g.late++;
+    }
+  }
+  for (const r of records) {
+    const key = `${r.grade}학년 ${r.classNum}반`;
+    if (classGroups.has(key) && Array.isArray(r.items) && r.items.length > 0) {
+      classGroups.get(key).guided++;
+    }
+  }
+
+  if (classGroups.size === 0) {
+    el.classStatsList.innerHTML = `<p class="empty-state">등록된 학급이 없습니다.</p>`;
+  } else {
+    el.classStatsList.innerHTML = [...classGroups.entries()]
+      .map(
+        ([label, g]) => `
+        <div class="mini-stat-row">
+          <strong>${escapeHtml(label)}</strong>
+          <span>
+            등교 <strong>${g.present}/${g.total}</strong> ·
+            <span class="text-danger">지각 ${g.late}</span> ·
+            <span class="text-warning">지도 ${g.guided}</span>
+          </span>
+        </div>
+      `
+      )
+      .join("");
+  }
+
+  // 3. 상세 기록 테이블
+  const q = state.recordSearch.trim().toLowerCase();
+  const filteredRecords = records.filter((r) => {
+    if (state.recordTypeFilter === "late" && !(r.type === "late" || r.includeLate)) return false;
+    if (state.recordTypeFilter === "guidance" && !(Array.isArray(r.items) && r.items.length > 0)) return false;
+    if (!q) return true;
+    const hay = [r.studentId, r.studentName, r.teacher, r.memo, ...(r.items || [])]
+      .join(" ")
+      .toLowerCase();
+    return hay.includes(q);
+  });
+
+  if (filteredRecords.length === 0) {
+    el.recordsTableBody.innerHTML = `<tr><td colspan="7" class="empty-state">표시할 기록이 없습니다.</td></tr>`;
+    return;
+  }
+
+  el.recordsTableBody.innerHTML = filteredRecords
+    .map((r) => {
+      const typeBadges = [];
+      if (r.type === "late" || r.includeLate) typeBadges.push(`<span class="pill-mini pill-late">지각</span>`);
+      if (Array.isArray(r.items) && r.items.length > 0) typeBadges.push(`<span class="pill-mini pill-guidance">생활규정</span>`);
+
+      const detailParts = [];
+      if (Array.isArray(r.items) && r.items.length > 0) {
+        detailParts.push(escapeHtml(r.items.join(", ")));
+      }
+      if (r.memo) {
+        detailParts.push(`<span class="text-muted">(${escapeHtml(r.memo)})</span>`);
+      }
+
+      return `
+        <tr>
+          <td style="font-variant-numeric:tabular-nums">${escapeHtml(r.time || "")}</td>
+          <td><strong>${escapeHtml(r.studentId)}</strong></td>
+          <td>${escapeHtml(r.studentName)}</td>
+          <td>${typeBadges.join(" ")}</td>
+          <td>${detailParts.join(" ") || "-"}</td>
+          <td>${escapeHtml(r.teacher || "")}</td>
+          <td><button type="button" class="btn-delete-mini" data-delete-record="${escapeHtml(r.id)}">삭제</button></td>
+        </tr>
+      `;
+    })
+    .join("");
+}
+
+function renderAll() {
+  renderConnectionStatus();
+  renderSettingsUI();
+  renderSummaryCounters();
+  renderGateTab();
+  renderAttendanceTab();
+  renderRecordsTab();
+}
+
+/* ============================================================
+   교문지도 핵심 액션 (출석 / 지각 / 생활규정 지도)
+   ============================================================ */
+
+async function togglePresent(studentId) {
+  const stu = state.studentsMap[studentId];
+  if (!stu) return;
+
+  const existing = state.daily.attendance?.[studentId];
+  if (existing) {
+    await db.setAttendance(state.activeDate, studentId, null);
+    showToast(`${stu.name} 등교 체크가 취소되었습니다.`);
+  } else {
+    const time = getCurrentTimeString();
+    await db.setAttendance(state.activeDate, studentId, {
+      status: "present",
+      late: false,
+      time,
+      timestamp: Date.now(),
+      teacher: state.teacherName
+    });
+    showToast(`${stu.name} 등교 완료 (${time})`, "success");
+  }
+}
+
+async function markLateQuick(studentId) {
+  const stu = state.studentsMap[studentId];
+  if (!stu) return;
+
+  const time = getCurrentTimeString();
+  const timestamp = Date.now();
+
+  await db.setAttendance(state.activeDate, studentId, {
+    status: "late",
+    late: true,
+    time,
+    timestamp,
+    teacher: state.teacherName
+  });
+
+  await db.addRecord(state.activeDate, {
+    studentId: stu.id,
+    studentName: stu.name,
+    grade: stu.grade,
+    classNum: stu.classNum,
+    number: stu.number,
+    type: "late",
+    includeLate: true,
+    items: [],
+    memo: "",
+    time,
+    timestamp,
+    teacher: state.teacherName
+  });
+
+  showToast(`${stu.name} 지각 처리됨 (${time})`, "error");
+}
+
+function openGuidanceModal(studentId) {
+  const stu = state.studentsMap[studentId];
+  if (!stu) return;
+
+  state.modalStudentId = studentId;
+  el.guidanceModalStudent.textContent = `${stu.id} ${stu.name} (${stu.grade}학년 ${stu.classNum}반 ${stu.number}번)`;
+  el.modalIncludeLate.checked = isPastLateThreshold();
+  el.modalGuidanceMemo.value = "";
+
+  const items = state.settings.guidanceItems || [];
+  el.modalGuidanceChips.innerHTML = items
+    .map(
+      (item) => `<button type="button" class="select-chip" data-select-item="${escapeHtml(item)}" aria-pressed="false">${escapeHtml(item)}</button>`
+    )
+    .join("");
+
+  el.guidanceModal.showModal();
+}
+
+async function submitGuidanceModal(e) {
+  e.preventDefault();
+  const stu = state.studentsMap[state.modalStudentId];
+  if (!stu) return;
+
+  const selectedItems = [...el.modalGuidanceChips.querySelectorAll(".select-chip.selected")].map(
+    (btn) => btn.dataset.selectItem
+  );
+  const includeLate = el.modalIncludeLate.checked;
+  const memo = el.modalGuidanceMemo.value.trim();
+
+  if (!includeLate && selectedItems.length === 0 && !memo) {
+    showToast("지각 또는 지도 항목을 1개 이상 선택해 주세요.", "error");
+    return;
+  }
+
+  const time = getCurrentTimeString();
+  const timestamp = Date.now();
+
+  // 지각 체크 또는 아직 미등교 상태면 출석 자동 기록
+  const existingAtt = state.daily.attendance?.[stu.id];
+  if (includeLate) {
+    await db.setAttendance(state.activeDate, stu.id, {
+      status: "late",
+      late: true,
+      time,
+      timestamp,
+      teacher: state.teacherName
+    });
+  } else if (!existingAtt) {
+    await db.setAttendance(state.activeDate, stu.id, {
+      status: "present",
+      late: false,
+      time,
+      timestamp,
+      teacher: state.teacherName
+    });
+  }
+
+  await db.addRecord(state.activeDate, {
+    studentId: stu.id,
+    studentName: stu.name,
+    grade: stu.grade,
+    classNum: stu.classNum,
+    number: stu.number,
+    type: selectedItems.length > 0 ? "guidance" : "late",
+    includeLate,
+    items: selectedItems,
+    memo,
+    time,
+    timestamp,
+    teacher: state.teacherName
+  });
+
+  el.guidanceModal.close();
+  showToast(`${stu.name} 지도 기록이 실시간 저장되었습니다.`, "success");
+}
+
+/* ============================================================
+   탭 전환 & 이벤트 바인딩
+   ============================================================ */
+
+function switchTab(tabName) {
+  state.activeTab = tabName;
+  document.querySelectorAll(".tab-panel").forEach((panel) => {
+    const isTarget = panel.id === `tab-${tabName}`;
+    panel.hidden = !isTarget;
+    panel.classList.toggle("active", isTarget);
+  });
+  document.querySelectorAll(".bottom-nav .nav-item").forEach((btn) => {
+    const isTarget = btn.dataset.tab === tabName;
+    btn.classList.toggle("active", isTarget);
+    if (isTarget) btn.setAttribute("aria-current", "page");
+    else btn.removeAttribute("aria-current");
+  });
+}
+
+function setupDialogLightDismiss(dialog) {
+  dialog.addEventListener("click", (e) => {
+    if (e.target === dialog) dialog.close();
+  });
+}
+
+function bindEvents() {
+  // 다이얼로그 닫기 버튼 및 바깥 클릭 닫기
+  document.querySelectorAll("[data-close-dialog]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      document.getElementById(btn.dataset.closeDialog)?.close();
+    });
+  });
+  setupDialogLightDismiss(el.guidanceModal);
+  setupDialogLightDismiss(el.setupGuideModal);
+
+  // Firebase 설정 가이드 모달 열기
+  const openGuide = () => el.setupGuideModal.showModal();
+  el.openSetupGuideBtn.addEventListener("click", openGuide);
+  el.demoGuideBtn.addEventListener("click", openGuide);
+  el.syncStatusBtn.addEventListener("click", openGuide);
+
+  // 최근 교사 칩 클릭
+  el.recentTeachers.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-recent-teacher]");
+    if (!btn) return;
+    el.teacherNameInput.value = btn.dataset.recentTeacher;
+    el.pinInput.focus();
+  });
+
+  // 교사 로그인 제출
+  el.loginForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const teacherName = el.teacherNameInput.value.trim();
+    const pin = el.pinInput.value.trim();
+
+    if (!teacherName) {
+      el.loginError.textContent = "담당 교사 성함을 입력해 주세요.";
+      el.loginError.hidden = false;
+      el.teacherNameInput.focus();
+      return;
+    }
+
+    const valid = await db.verifyPin(pin, state.settings);
+    if (!valid) {
+      el.loginError.textContent = "접속 PIN이 일치하지 않습니다. 다시 확인해 주세요.";
+      el.loginError.hidden = false;
+      el.pinInput.select();
+      return;
+    }
+
+    el.loginError.hidden = true;
+    saveSession(teacherName, el.rememberLogin.checked);
+    enterApp(teacherName);
+    showToast(`${teacherName} 선생님, 환영합니다!`, "success");
+  });
+
+  // 로그아웃
+  el.logoutBtn.addEventListener("click", () => {
+    if (confirm("교사를 전환하거나 로그아웃하시겠습니까?")) {
+      exitApp();
+    }
+  });
+
+  // 날짜 변경
+  el.activeDateInput.value = state.activeDate;
+  el.activeDateInput.addEventListener("change", () => {
+    const nextDate = el.activeDateInput.value || getTodayDateString();
+    state.activeDate = nextDate;
+    db.subscribeDate(nextDate);
+    showToast(`${nextDate} 기록을 불러왔습니다.`);
+  });
+
+  // 하단 네비게이션
+  document.querySelectorAll(".bottom-nav .nav-item").forEach((btn) => {
+    btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+  });
+
+  // 탭 1: 검색 입력
+  el.gateSearchInput.addEventListener("input", () => {
+    state.gateSearch = el.gateSearchInput.value;
+    el.gateSearchClear.hidden = !state.gateSearch;
+    renderGateTab();
+  });
+
+  el.gateSearchClear.addEventListener("click", () => {
+    state.gateSearch = "";
+    el.gateSearchInput.value = "";
+    el.gateSearchClear.hidden = true;
+    el.gateSearchInput.focus();
+    renderGateTab();
+  });
+
+  el.gateGradeFilters.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-gate-grade]");
+    if (!btn) return;
+    state.gateGradeFilter = btn.dataset.gateGrade;
+    renderGateTab();
+  });
+
+  // 학생 액션 위임 (탭 1 & 탭 2 공통)
+  const handleStudentAction = async (e) => {
+    const btn = e.target.closest("[data-action]");
+    if (!btn) return;
+    const { action, id } = btn.dataset;
+    try {
+      if (action === "present") await togglePresent(id);
+      else if (action === "late") await markLateQuick(id);
+      else if (action === "guide") openGuidanceModal(id);
+    } catch (err) {
+      console.error(err);
+      showToast("저장 중 오류가 발생했습니다. 네트워크나 Firebase 규칙을 확인해 주세요.", "error");
+    }
+  };
+  el.gateStudentList.addEventListener("click", handleStudentAction);
+  el.attendanceGrid.addEventListener("click", handleStudentAction);
+
+  // 기록 삭제 위임 (피드 & 테이블 공통)
+  const handleDeleteRecord = async (e) => {
+    const btn = e.target.closest("[data-delete-record]");
+    if (!btn) return;
+    const recordId = btn.dataset.deleteRecord;
+    if (!confirm("이 지도 기록을 삭제(취소)하시겠습니까?")) return;
+    await db.deleteRecord(state.activeDate, recordId);
+    showToast("기록이 삭제되었습니다.");
+  };
+  el.liveFeedList.addEventListener("click", handleDeleteRecord);
+  el.recordsTableBody.addEventListener("click", handleDeleteRecord);
+
+  // 지도 모달 칩 토글 & 제출
+  el.modalGuidanceChips.addEventListener("click", (e) => {
+    const btn = e.target.closest(".select-chip");
+    if (!btn) return;
+    const next = !btn.classList.contains("selected");
+    btn.classList.toggle("selected", next);
+    btn.setAttribute("aria-pressed", String(next));
+  });
+  el.guidanceModalForm.addEventListener("submit", submitGuidanceModal);
+
+  // 탭 2: 출석 필터
+  el.attGradeChips.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-att-grade]");
+    if (!btn) return;
+    state.attGradeFilter = btn.dataset.attGrade;
+    state.attClassFilter = "all";
+    renderAttendanceTab();
+  });
+
+  el.attClassChips.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-att-class]");
+    if (!btn) return;
+    state.attClassFilter = btn.dataset.attClass;
+    renderAttendanceTab();
+  });
+
+  document.querySelectorAll("[data-att-status]").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      state.attStatusFilter = btn.dataset.attStatus;
+      document.querySelectorAll("[data-att-status]").forEach((b) =>
+        b.classList.toggle("active", b === btn)
+      );
+      renderAttendanceTab();
+    });
+  });
+
+  // 미등교 명단 복사
+  el.copyAbsentBtn.addEventListener("click", async () => {
+    const attendance = state.daily.attendance || {};
+    const absent = state.studentsList.filter((s) => {
+      if (state.attGradeFilter !== "all" && String(s.grade) !== String(state.attGradeFilter)) return false;
+      if (state.attClassFilter !== "all" && String(s.classNum) !== String(state.attClassFilter)) return false;
+      return !attendance[s.id];
+    });
+
+    if (absent.length === 0) {
+      showToast("미등교 학생이 없습니다! 전원 등교 완료 🎉", "success");
+      return;
+    }
+
+    const lines = [
+      `[${state.activeDate} 미등교 현황 (${absent.length}명)]`,
+      ...absent.map((s) => `- ${s.id} ${s.name} (${s.grade}학년 ${s.classNum}반)`)
+    ];
+    const text = lines.join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`미등교 학생 ${absent.length}명 명단이 복사되었습니다.`, "success");
+    } catch {
+      prompt("아래 미등교 명단을 복사하세요:", text);
+    }
+  });
+
+  // 현재 반 전체 등교 처리
+  el.markClassPresentBtn.addEventListener("click", async () => {
+    if (state.attGradeFilter === "all" || state.attClassFilter === "all") {
+      showToast("먼저 학년과 반을 선택해 주세요.", "error");
+      return;
+    }
+    const targets = state.studentsList.filter(
+      (s) =>
+        String(s.grade) === String(state.attGradeFilter) &&
+        String(s.classNum) === String(state.attClassFilter) &&
+        !state.daily.attendance?.[s.id]
+    );
+    if (targets.length === 0) {
+      showToast("이미 해당 반 전원 등교 처리되어 있습니다.");
+      return;
+    }
+    if (!confirm(`${state.attGradeFilter}학년 ${state.attClassFilter}반 미등교 학생 ${targets.length}명을 모두 등교 처리할까요?`)) {
+      return;
+    }
+    const time = getCurrentTimeString();
+    const timestamp = Date.now();
+    const bulk = {};
+    for (const s of targets) {
+      bulk[s.id] = {
+        status: "present",
+        late: false,
+        time,
+        timestamp,
+        teacher: state.teacherName
+      };
+    }
+    await db.bulkSetAttendance(state.activeDate, bulk);
+    showToast(`${targets.length}명 일괄 등교 처리 완료!`, "success");
+  });
+
+  // 탭 3: 기록 필터 & CSV 다운로드
+  el.recordTypeFilter.addEventListener("change", () => {
+    state.recordTypeFilter = el.recordTypeFilter.value;
+    renderRecordsTab();
+  });
+
+  el.recordSearchInput.addEventListener("input", () => {
+    state.recordSearch = el.recordSearchInput.value;
+    renderRecordsTab();
+  });
+
+  el.exportRecordsCsvBtn.addEventListener("click", () => {
+    const records = getSortedRecords();
+    if (records.length === 0) {
+      showToast("내보낼 지도 기록이 없습니다.", "error");
+      return;
+    }
+    const rows = records.map((r) => [
+      state.activeDate,
+      r.time || "",
+      r.studentId,
+      r.grade,
+      r.classNum,
+      r.number,
+      r.studentName,
+      r.type === "late" || r.includeLate ? "지각" : "",
+      (r.items || []).join(" / "),
+      r.memo || "",
+      r.teacher || ""
+    ]);
+    downloadCsv(
+      `교문지도기록_${state.activeDate}.csv`,
+      ["날짜", "시각", "학번", "학년", "반", "번호", "이름", "지각여부", "지도항목", "메모", "담당교사"],
+      rows
+    );
+    showToast("지도 기록 CSV 파일이 다운로드되었습니다.", "success");
+  });
+
+  el.exportAttendanceCsvBtn.addEventListener("click", () => {
+    if (state.studentsList.length === 0) {
+      showToast("등록된 학생 명단이 없습니다.", "error");
+      return;
+    }
+    const attendance = state.daily.attendance || {};
+    const rows = state.studentsList.map((s) => {
+      const att = attendance[s.id];
+      const status = att ? (att.late || att.status === "late" ? "지각" : "등교") : "미등교";
+      return [
+        state.activeDate,
+        s.id,
+        s.grade,
+        s.classNum,
+        s.number,
+        s.name,
+        status,
+        att?.time || "",
+        att?.teacher || ""
+      ];
+    });
+    downloadCsv(
+      `등교출석현황_${state.activeDate}.csv`,
+      ["날짜", "학번", "학년", "반", "번호", "이름", "출석상태", "확인시각", "확인교사"],
+      rows
+    );
+    showToast("출석 현황 CSV 파일이 다운로드되었습니다.", "success");
+  });
+
+  // 탭 4: 샘플 불러오기 & 명단 업로드
+  const loadSampleStudents = async () => {
+    const sample = getSampleStudentsMap();
+    await db.saveStudents(sample, "replace");
+    showToast("샘플 학생 명단 30명이 등록되었습니다!", "success");
+  };
+  el.quickLoadSampleBtn.addEventListener("click", loadSampleStudents);
+  el.loadSampleRosterBtn.addEventListener("click", async () => {
+    if (state.studentsList.length > 0 && !confirm("기존 학생 명단을 샘플 30명으로 교체할까요?")) return;
+    await loadSampleStudents();
+  });
+  el.goRosterTabBtn.addEventListener("click", () => switchTab("settings"));
+  el.downloadSampleCsvBtn.addEventListener("click", () => {
+    downloadSampleRosterCsv();
+    showToast("샘플 CSV 양식이 다운로드되었습니다.");
+  });
+
+  // 드롭존 클릭 & 드래그 앤 드롭
+  el.rosterDropzone.addEventListener("click", () => el.rosterFileInput.click());
+  el.rosterDropzone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    el.rosterDropzone.classList.add("dragover");
+  });
+  el.rosterDropzone.addEventListener("dragleave", () => {
+    el.rosterDropzone.classList.remove("dragover");
+  });
+  el.rosterDropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    el.rosterDropzone.classList.remove("dragover");
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleRosterFileSelected(file);
+  });
+  el.rosterFileInput.addEventListener("change", () => {
+    const file = el.rosterFileInput.files?.[0];
+    if (file) handleRosterFileSelected(file);
+    el.rosterFileInput.value = "";
+  });
+
+  el.confirmUploadBtn.addEventListener("click", async () => {
+    if (!state.pendingUpload) return;
+    const mode = document.querySelector('input[name="importMode"]:checked')?.value || "replace";
+    await db.saveStudents(state.pendingUpload.studentMap, mode);
+    showToast(`${state.pendingUpload.count}명의 학생 명단이 동기화되었습니다!`, "success");
+    state.pendingUpload = null;
+    el.uploadPreviewBox.hidden = true;
+  });
+
+  el.cancelUploadBtn.addEventListener("click", () => {
+    state.pendingUpload = null;
+    el.uploadPreviewBox.hidden = true;
+  });
+
+  el.clearRosterBtn.addEventListener("click", async () => {
+    if (state.studentsList.length === 0) return;
+    if (!confirm("등록된 전체 학생 명단을 정말 삭제하시겠습니까?")) return;
+    await db.clearStudents();
+    showToast("학생 명단이 삭제되었습니다.");
+  });
+
+  // 개별 학생 추가
+  el.addStudentForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const rawId = el.newStudentId.value.trim().replace(/[.#$[\]/\s]/g, "");
+    const name = el.newStudentName.value.trim();
+    if (!rawId || !name) return;
+
+    const parsed = parseStudentId(rawId);
+    await db.upsertStudent({
+      id: rawId,
+      grade: parsed.grade,
+      classNum: parsed.classNum,
+      number: parsed.number,
+      name
+    });
+    el.newStudentId.value = "";
+    el.newStudentName.value = "";
+    showToast(`${rawId} ${name} 학생이 추가되었습니다.`, "success");
+  });
+
+  // 학교 설정 저장
+  el.schoolSettingsForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const schoolName = el.settingSchoolName.value.trim();
+    const lateTime = el.settingLateTime.value;
+    const newPin = el.settingNewPin.value.trim();
+
+    const patch = { schoolName, lateTime };
+    if (newPin) {
+      if (newPin.length < 4) {
+        showToast("접속 PIN은 4자리 이상으로 입력해 주세요.", "error");
+        return;
+      }
+      patch.pinHash = await hashPin(newPin);
+    }
+
+    await db.updateSettings(patch);
+    el.settingNewPin.value = "";
+    showToast("학교 설정이 실시간으로 반영되었습니다.", "success");
+  });
+
+  // 지도 항목 추가/삭제
+  el.addGuidanceItemForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const label = el.newItemLabel.value.trim();
+    if (!label) return;
+    const current = state.settings.guidanceItems || [];
+    if (current.includes(label)) {
+      showToast("이미 등록된 지도 항목입니다.", "error");
+      return;
+    }
+    await db.updateSettings({ guidanceItems: [...current, label] });
+    el.newItemLabel.value = "";
+    showToast(`'${label}' 항목이 추가되었습니다.`, "success");
+  });
+
+  el.settingsGuidanceItems.addEventListener("click", async (e) => {
+    const btn = e.target.closest("[data-remove-item-idx]");
+    if (!btn) return;
+    const idx = Number(btn.dataset.removeItemIdx);
+    const next = (state.settings.guidanceItems || []).filter((_, i) => i !== idx);
+    if (next.length === 0) {
+      showToast("최소 1개 이상의 지도 항목이 필요합니다.", "error");
+      return;
+    }
+    await db.updateSettings({ guidanceItems: next });
+    showToast("지도 항목이 삭제되었습니다.");
+  });
+}
+
+async function handleRosterFileSelected(file) {
+  try {
+    const result = await parseRosterFile(file);
+    state.pendingUpload = result;
+    el.uploadPreviewSummary.textContent = `${result.count}명 인식됨${result.skipped ? ` (제외 ${result.skipped}행)` : ""}`;
+    const previewItems = Object.values(result.studentMap)
+      .slice(0, 6)
+      .map((s) => `${s.id} ${s.name}`)
+      .join(", ");
+    el.uploadPreviewSample.textContent = `미리보기: ${previewItems}${result.count > 6 ? " ..." : ""}`;
+    el.uploadPreviewBox.hidden = false;
+  } catch (err) {
+    showToast(err.message || "파일을 읽는 중 오류가 발생했습니다.", "error");
+  }
+}
+
+/* ============================================================
+   앱 초기화
+   ============================================================ */
+
+async function bootstrap() {
+  renderRecentTeachers();
+  bindEvents();
+
+  db.on("connection", (info) => {
+    state.connection = info;
+    renderConnectionStatus();
+  });
+
+  db.on("settings", (settings) => {
+    state.settings = settings;
+    renderSettingsUI();
+  });
+
+  db.on("students", (studentsMap) => {
+    state.studentsMap = studentsMap || {};
+    state.studentsList = sortStudents(state.studentsMap);
+    renderSummaryCounters();
+    renderGateTab();
+    renderAttendanceTab();
+    renderRecordsTab();
+  });
+
+  db.on("daily", (dailyData) => {
+    state.daily = dailyData || { attendance: {}, records: {} };
+    renderSummaryCounters();
+    renderGateTab();
+    renderAttendanceTab();
+    renderRecordsTab();
+  });
+
+  await db.init();
+  db.subscribeDate(state.activeDate);
+
+  // 시계 1초마다 갱신
+  updateClock();
+  setInterval(updateClock, 1000);
+
+  // 저장된 교사 세션이 있으면 자동 접속
+  const saved = loadSavedSession();
+  if (saved) {
+    enterApp(saved.teacherName);
+  }
+}
+
+bootstrap();
