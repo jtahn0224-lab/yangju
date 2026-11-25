@@ -157,6 +157,7 @@ const el = {
   guidanceModal: document.getElementById("guidance-modal"),
   guidanceModalForm: document.getElementById("guidance-modal-form"),
   guidanceModalStudent: document.getElementById("guidance-modal-student"),
+  modalIncludeLateCard: document.getElementById("modal-include-late-card"),
   modalIncludeLate: document.getElementById("modal-include-late"),
   modalGuidanceChips: document.getElementById("modal-guidance-chips"),
   modalGuidanceMemo: document.getElementById("modal-guidance-memo"),
@@ -1093,13 +1094,22 @@ async function markLateQuick(studentId) {
   showToast(`${stu.name} 지각 처리됨 (${time})`, "error");
 }
 
+function syncModalLateCardUI() {
+  if (!el.modalIncludeLateCard) return;
+  el.modalIncludeLateCard.classList.toggle("is-checked", Boolean(el.modalIncludeLate.checked));
+}
+
 function openGuidanceModal(studentId) {
   const stu = state.studentsMap[studentId];
   if (!stu) return;
 
   state.modalStudentId = studentId;
+  el.guidanceModalForm.reset();
   el.guidanceModalStudent.textContent = `${formatStudentId(stu)} ${stu.name} (${stu.grade}학년 ${stu.classNum}반 ${stu.number}번)`;
+  el.modalIncludeLate.defaultChecked = false;
   el.modalIncludeLate.checked = false;
+  el.modalIncludeLate.removeAttribute("checked");
+  syncModalLateCardUI();
   el.modalGuidanceMemo.value = "";
 
   const items = state.settings.guidanceItems || [];
@@ -1348,6 +1358,7 @@ function bindEvents() {
     btn.classList.toggle("selected", next);
     btn.setAttribute("aria-pressed", String(next));
   });
+  el.modalIncludeLate.addEventListener("change", syncModalLateCardUI);
   el.guidanceModalForm.addEventListener("submit", submitGuidanceModal);
 
   // 탭 2: 출석 필터

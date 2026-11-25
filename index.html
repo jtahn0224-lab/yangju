@@ -7,7 +7,7 @@
   <title>교문지도 실시간 체크</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
-  <link rel="stylesheet" href="./css/style.css" />
+  <link rel="stylesheet" href="./css/style.css?v=20261125-3" />
 </head>
 <body>
   <!-- 교사 접속(PIN) 게이트 화면 -->
@@ -517,11 +517,11 @@
 
       <div class="modal-body">
         <div class="form-group">
-          <label class="checkbox-card">
-            <input type="checkbox" id="modal-include-late" />
+          <label class="checkbox-card" id="modal-include-late-card">
+            <input type="checkbox" id="modal-include-late" autocomplete="off" />
             <span>
               <strong>지각 함께 체크</strong>
-              <small>현재 시각으로 지각 및 등교 출석이 자동 기록됩니다.</small>
+              <small>체크 시 현재 시각으로 지각 및 등교 출석이 함께 기록됩니다.</small>
             </span>
           </label>
         </div>
@@ -586,6 +586,6 @@
 
   <!-- SheetJS (엑셀 .xlsx/.xls 파싱용, 실패해도 CSV는 내장 파서로 동작) -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
-  <script type="module" src="./js/app.js"></script>
+  <script type="module" src="./js/app.js?v=20261125-3"></script>
 </body>
 </html>

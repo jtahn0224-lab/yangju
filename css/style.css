@@ -1509,10 +1509,11 @@ select:focus {
   align-items: flex-start;
   gap: 10px;
   padding: 12px;
-  border: 1.5px solid var(--danger-border);
+  border: 1.5px solid var(--border-strong);
   border-radius: var(--radius-md);
-  background: #fef2f2;
+  background: var(--surface-alt);
   cursor: pointer;
+  transition: background-color 0.15s ease, border-color 0.15s ease;
 }
 
 .checkbox-card input {
@@ -1525,12 +1526,28 @@ select:focus {
 .checkbox-card strong {
   display: block;
   font-size: 0.92rem;
-  color: var(--danger);
+  color: var(--text-secondary);
 }
 
 .checkbox-card small {
   display: block;
   font-size: 0.78rem;
+  color: var(--text-muted);
+}
+
+.checkbox-card.is-checked,
+.checkbox-card:has(input:checked) {
+  border-color: var(--danger-border);
+  background: #fef2f2;
+}
+
+.checkbox-card.is-checked strong,
+.checkbox-card:has(input:checked) strong {
+  color: var(--danger);
+}
+
+.checkbox-card.is-checked small,
+.checkbox-card:has(input:checked) small {
   color: var(--text-secondary);
 }
 
