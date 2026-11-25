@@ -25,6 +25,7 @@ const state = {
   connection: { mode: "demo", connected: false },
   settings: {
     schoolName: "OO학교 교문지도",
+    schoolLogo: "",
     lateTime: "08:30",
     pinHash: null,
     guidanceItems: [],
@@ -65,6 +66,8 @@ const el = {
   loginScreen: document.getElementById("login-screen"),
   loginSyncDot: document.getElementById("login-sync-dot"),
   loginSyncLabel: document.getElementById("login-sync-label"),
+  loginLogoImg: document.getElementById("login-logo-img"),
+  loginLogoFallback: document.getElementById("login-logo-fallback"),
   loginSchoolName: document.getElementById("login-school-name"),
   loginForm: document.getElementById("login-form"),
   teacherNameInput: document.getElementById("teacher-name-input"),
@@ -76,6 +79,7 @@ const el = {
   openSetupGuideBtn: document.getElementById("open-setup-guide-btn"),
 
   appShell: document.getElementById("app-shell"),
+  headerLogoImg: document.getElementById("header-logo-img"),
   headerSchoolName: document.getElementById("header-school-name"),
   syncStatusBtn: document.getElementById("sync-status-btn"),
   headerSyncDot: document.getElementById("header-sync-dot"),
@@ -159,6 +163,11 @@ const el = {
   settingSchoolName: document.getElementById("setting-school-name"),
   settingLateTime: document.getElementById("setting-late-time"),
   settingNewPin: document.getElementById("setting-new-pin"),
+  settingLogoPreview: document.getElementById("setting-logo-preview"),
+  settingLogoEmpty: document.getElementById("setting-logo-empty"),
+  settingLogoInput: document.getElementById("setting-logo-input"),
+  uploadLogoBtn: document.getElementById("upload-logo-btn"),
+  removeLogoBtn: document.getElementById("remove-logo-btn"),
   settingsGuidanceItems: document.getElementById("settings-guidance-items"),
   addGuidanceItemForm: document.getElementById("add-guidance-item-form"),
   newItemLabel: document.getElementById("new-item-label"),
@@ -645,6 +654,78 @@ function renderConnectionStatus() {
    렌더링 함수
    ============================================================ */
 
+const STATIC_LOGO_PATH = "./assets/school-logo.png";
+
+function applySchoolLogoUI(logoSrc) {
+  const showLogo = (src) => {
+    if (el.loginLogoImg) {
+      el.loginLogoImg.src = src;
+      el.loginLogoImg.hidden = false;
+    }
+    if (el.loginLogoFallback) el.loginLogoFallback.hidden = true;
+    if (el.headerLogoImg) {
+      el.headerLogoImg.src = src;
+      el.headerLogoImg.hidden = false;
+    }
+    if (el.settingLogoPreview) {
+      el.settingLogoPreview.src = src;
+      el.settingLogoPreview.hidden = false;
+    }
+    if (el.settingLogoEmpty) el.settingLogoEmpty.hidden = true;
+  };
+
+  const hideLogo = () => {
+    if (el.loginLogoImg) el.loginLogoImg.hidden = true;
+    if (el.loginLogoFallback) el.loginLogoFallback.hidden = false;
+    if (el.headerLogoImg) el.headerLogoImg.hidden = true;
+    if (el.settingLogoPreview) el.settingLogoPreview.hidden = true;
+    if (el.settingLogoEmpty) el.settingLogoEmpty.hidden = false;
+  };
+
+  if (logoSrc) {
+    showLogo(logoSrc);
+    return;
+  }
+
+  // Firebase에 저장된 로고가 없으면 정적 파일(./assets/school-logo.png) 자동 확인
+  const probe = new Image();
+  probe.onload = () => {
+    if (!state.settings.schoolLogo) showLogo(STATIC_LOGO_PATH);
+  };
+  probe.onerror = () => {
+    if (!state.settings.schoolLogo) hideLogo();
+  };
+  probe.src = STATIC_LOGO_PATH;
+}
+
+/**
+ * 업로드한 로고 이미지를 최대 240x240 크기로 최적화해 Data URL 생성
+ */
+function resizeLogoImageToDataUrl(file, maxSize = 240) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(new Error("이미지 파일을 읽지 못했습니다."));
+    reader.onload = () => {
+      const img = new Image();
+      img.onerror = () => reject(new Error("올바른 이미지 파일이 아닙니다."));
+      img.onload = () => {
+        const scale = Math.min(1, maxSize / Math.max(img.width || 1, img.height || 1));
+        const w = Math.max(1, Math.round(img.width * scale));
+        const h = Math.max(1, Math.round(img.height * scale));
+        const canvas = document.createElement("canvas");
+        canvas.width = w;
+        canvas.height = h;
+        const ctx = canvas.getContext("2d");
+        ctx.clearRect(0, 0, w, h);
+        ctx.drawImage(img, 0, 0, w, h);
+        resolve(canvas.toDataURL("image/png"));
+      };
+      img.src = reader.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
 function renderSettingsUI() {
   const s = state.settings;
   document.title = `${s.schoolName} | 실시간 교문지도`;
@@ -652,6 +733,7 @@ function renderSettingsUI() {
   el.headerSchoolName.textContent = s.schoolName;
   el.settingSchoolName.value = s.schoolName;
   el.settingLateTime.value = s.lateTime;
+  applySchoolLogoUI(s.schoolLogo);
 
   if (s.pinHash) {
     el.loginPinHint.textContent = "학교에서 설정한 교사 접속 PIN을 입력해 주세요.";
@@ -1995,6 +2077,36 @@ function bindEvents() {
     el.newStudentId.value = "";
     el.newStudentName.value = "";
     showToast(`${normalizedId} ${name} 학생이 추가되었습니다.`, "success");
+  });
+
+  el.uploadLogoBtn.addEventListener("click", () => el.settingLogoInput.click());
+
+  el.settingLogoInput.addEventListener("change", async () => {
+    const file = el.settingLogoInput.files?.[0];
+    el.settingLogoInput.value = "";
+    if (!file) return;
+    if (!file.type.startsWith("image/")) {
+      showToast("이미지 파일(.png, .jpg, .webp 등)만 업로드할 수 있습니다.", "error");
+      return;
+    }
+    try {
+      const dataUrl = await resizeLogoImageToDataUrl(file, 240);
+      await db.updateSettings({ schoolLogo: dataUrl });
+      showToast("학교 로고가 로그인 화면에 실시간 반영되었습니다!", "success");
+    } catch (err) {
+      console.error(err);
+      showToast(err.message || "로고 업로드 중 오류가 발생했습니다.", "error");
+    }
+  });
+
+  el.removeLogoBtn.addEventListener("click", async () => {
+    if (!state.settings.schoolLogo) {
+      showToast("초기화할 등록 로고가 없습니다.");
+      return;
+    }
+    if (!confirm("등록된 학교 로고를 초기화할까요?")) return;
+    await db.updateSettings({ schoolLogo: "" });
+    showToast("학교 로고가 초기화되었습니다.");
   });
 
   el.schoolSettingsForm.addEventListener("submit", async (e) => {

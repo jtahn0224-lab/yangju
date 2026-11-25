@@ -53,6 +53,7 @@ function createEmptyLocalStore() {
   return {
     settings: {
       schoolName: DEFAULT_SETTINGS.schoolName,
+      schoolLogo: "",
       lateTime: DEFAULT_SETTINGS.lateTime,
       pinHash: null,
       guidanceItems: [...DEFAULT_SETTINGS.guidanceItems],
@@ -91,6 +92,7 @@ function writeLocalStore(data) {
 function normalizeSettings(raw) {
   const base = {
     schoolName: DEFAULT_SETTINGS.schoolName,
+    schoolLogo: "",
     lateTime: DEFAULT_SETTINGS.lateTime,
     pinHash: null,
     guidanceItems: [...DEFAULT_SETTINGS.guidanceItems],
@@ -104,6 +106,7 @@ function normalizeSettings(raw) {
 
   return {
     schoolName: raw.schoolName || base.schoolName,
+    schoolLogo: typeof raw.schoolLogo === "string" ? raw.schoolLogo : "",
     lateTime: raw.lateTime || base.lateTime,
     pinHash: raw.pinHash || null,
     guidanceItems:

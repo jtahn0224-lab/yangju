@@ -7,7 +7,7 @@
   <title>교문지도 실시간 체크</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
-  <link rel="stylesheet" href="./css/style.css?v=20261125-4" />
+  <link rel="stylesheet" href="./css/style.css?v=20261125-5" />
 </head>
 <body>
   <!-- 교사 접속(PIN) 게이트 화면 -->
@@ -19,13 +19,22 @@
       </div>
 
       <div class="login-brand">
-        <div class="brand-icon" aria-hidden="true">
-          <svg viewBox="0 0 24 24" width="28" height="28" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-            <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-            <path d="m9 12 2 2 4-4"/>
-          </svg>
+        <div class="brand-logo-wrap" id="login-logo-wrap">
+          <img
+            id="login-logo-img"
+            class="brand-logo-img"
+            src="./assets/school-logo.png"
+            alt="양주중학교 로고"
+            hidden
+          />
+          <div class="brand-icon" id="login-logo-fallback" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="32" height="32" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              <path d="m9 12 2 2 4-4"/>
+            </svg>
+          </div>
         </div>
-        <h1 id="login-school-name">교문지도 실시간 체크</h1>
+        <h1 id="login-school-name">양주중학교 교문지도</h1>
         <p class="login-subtitle">선생님 성함과 교사 접속 PIN을 입력해 시작하세요.</p>
       </div>
 
@@ -85,7 +94,10 @@
     <header class="app-header">
       <div class="header-top">
         <div class="header-title-wrap">
-          <h1 id="header-school-name" class="header-title">교문지도 실시간 체크</h1>
+          <div class="header-title-row">
+            <img id="header-logo-img" class="header-logo-img" alt="학교 로고" hidden />
+            <h1 id="header-school-name" class="header-title">교문지도 실시간 체크</h1>
+          </div>
           <div class="header-meta">
             <button type="button" id="sync-status-btn" class="sync-pill" title="실시간 연동 상태 확인">
               <span class="status-dot" id="header-sync-dot"></span>
@@ -473,6 +485,24 @@
                 <input id="setting-new-pin" type="password" inputmode="numeric" placeholder="새 PIN 입력 (4~12자리)" maxlength="12" />
               </div>
 
+              <div class="form-group">
+                <label>학교 로고 (로그인 화면 · 상단 헤더 표시)</label>
+                <div class="logo-setting-row">
+                  <div class="logo-preview-box">
+                    <img id="setting-logo-preview" alt="학교 로고 미리보기" hidden />
+                    <span id="setting-logo-empty" class="logo-empty-text">미등록</span>
+                  </div>
+                  <div class="logo-setting-actions">
+                    <input type="file" id="setting-logo-input" accept="image/png,image/jpeg,image/webp,image/svg+xml" hidden />
+                    <div class="btn-row">
+                      <button type="button" id="upload-logo-btn" class="btn btn-secondary btn-sm">로고 이미지 선택</button>
+                      <button type="button" id="remove-logo-btn" class="btn btn-danger-outline btn-sm">초기화</button>
+                    </div>
+                    <p class="form-hint">양주중학교 로고(.png/.jpg)를 올리면 모든 기기의 로그인 화면에 즉시 반영됩니다. (또는 GitHub <code>assets/school-logo.png</code> 업로드)</p>
+                  </div>
+                </div>
+              </div>
+
               <button type="submit" class="btn btn-primary">설정 저장 (실시간 반영)</button>
             </form>
 
@@ -697,6 +727,6 @@
 
   <!-- SheetJS (엑셀 .xlsx/.xls 파싱용, 실패해도 CSV는 내장 파서로 동작) -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
-  <script type="module" src="./js/app.js?v=20261125-4"></script>
+  <script type="module" src="./js/app.js?v=20261125-5"></script>
 </body>
 </html>
