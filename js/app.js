@@ -5,7 +5,7 @@
  */
 
 import { GateDatabase, hashPin } from "./db.js";
-import { matchStudent, parseStudentId } from "./hangul.js";
+import { matchStudent, parseStudentId, buildStudentId, formatStudentId } from "./hangul.js";
 import {
   getSampleStudentsMap,
   downloadCsv,
@@ -365,12 +365,21 @@ function computeRepeatStudents() {
   const category = state.repeatCategory || "all";
   const byStudent = new Map();
 
-  function ensureEntry(studentId, fallback = {}) {
-    if (!byStudent.has(studentId)) {
-      const rosterInfo = state.studentsMap[studentId] || {};
-      byStudent.set(studentId, {
-        studentId,
-        studentName: rosterInfo.name || fallback.studentName || studentId,
+  function ensureEntry(rawStudentId, fallback = {}) {
+    const rosterInfo =
+      state.studentsMap[rawStudentId] ||
+      state.studentsMap[formatStudentId(rawStudentId)] ||
+      {};
+    const normalizedId = formatStudentId({
+      id: rawStudentId,
+      grade: rosterInfo.grade ?? fallback.grade,
+      classNum: rosterInfo.classNum ?? fallback.classNum,
+      number: rosterInfo.number ?? fallback.number
+    });
+    if (!byStudent.has(normalizedId)) {
+      byStudent.set(normalizedId, {
+        studentId: normalizedId,
+        studentName: rosterInfo.name || fallback.studentName || normalizedId,
         grade: rosterInfo.grade ?? fallback.grade ?? "",
         classNum: rosterInfo.classNum ?? fallback.classNum ?? "",
         number: rosterInfo.number ?? fallback.number ?? "",
@@ -381,7 +390,7 @@ function computeRepeatStudents() {
         itemCounts: new Map()
       });
     }
-    return byStudent.get(studentId);
+    return byStudent.get(normalizedId);
   }
 
   for (const [dateStr, dayData] of Object.entries(state.rangeDailyMap || {})) {
@@ -727,7 +736,7 @@ function renderGateTab() {
           <li class="student-row ${rowClass}" data-student-id="${escapeHtml(stu.id)}">
             <div class="student-info">
               <div class="student-title">
-                <span class="student-id-badge">${escapeHtml(stu.id)}</span>
+                <span class="student-id-badge">${escapeHtml(formatStudentId(stu))}</span>
                 <span class="student-name">${escapeHtml(stu.name)}</span>
                 <span class="text-muted" style="font-size:0.8rem">${stu.grade}학년 ${stu.classNum}반 ${stu.number}번</span>
               </div>
@@ -783,7 +792,7 @@ function renderLiveFeed() {
         <li class="feed-item">
           <div class="feed-item-main">
             <div class="feed-item-top">
-              <span class="student-id-badge">${escapeHtml(rec.studentId)}</span>
+              <span class="student-id-badge">${escapeHtml(formatStudentId(rec))}</span>
               <strong>${escapeHtml(rec.studentName)}</strong>
             </div>
             <div class="feed-tags">${tags.join("")}</div>
@@ -868,7 +877,7 @@ function renderAttendanceTab() {
       return `
         <div class="att-card ${cardClass}">
           <div class="att-card-top">
-            <span class="student-id-badge">${escapeHtml(s.id)}</span>
+            <span class="student-id-badge">${escapeHtml(formatStudentId(s))}</span>
             ${guidedCount > 0 ? `<span class="pill-mini pill-guidance">지도 ${guidedCount}</span>` : ""}
           </div>
           <div class="att-card-name">${escapeHtml(s.name)}</div>
@@ -977,7 +986,7 @@ function renderRecordsTab() {
     if (state.recordTypeFilter === "late" && !(r.type === "late" || r.includeLate)) return false;
     if (state.recordTypeFilter === "guidance" && !(Array.isArray(r.items) && r.items.length > 0)) return false;
     if (!q) return true;
-    const hay = [r.studentId, r.studentName, r.teacher, r.memo, ...(r.items || [])]
+    const hay = [formatStudentId(r), r.studentId, r.studentName, r.teacher, r.memo, ...(r.items || [])]
       .join(" ")
       .toLowerCase();
     return hay.includes(q);
@@ -1005,7 +1014,7 @@ function renderRecordsTab() {
       return `
         <tr>
           <td style="font-variant-numeric:tabular-nums">${escapeHtml(r.time || "")}</td>
-          <td><strong>${escapeHtml(r.studentId)}</strong></td>
+          <td><strong>${escapeHtml(formatStudentId(r))}</strong></td>
           <td>${escapeHtml(r.studentName)}</td>
           <td>${typeBadges.join(" ")}</td>
           <td>${detailParts.join(" ") || "-"}</td>
@@ -1089,7 +1098,7 @@ function openGuidanceModal(studentId) {
   if (!stu) return;
 
   state.modalStudentId = studentId;
-  el.guidanceModalStudent.textContent = `${stu.id} ${stu.name} (${stu.grade}학년 ${stu.classNum}반 ${stu.number}번)`;
+  el.guidanceModalStudent.textContent = `${formatStudentId(stu)} ${stu.name} (${stu.grade}학년 ${stu.classNum}반 ${stu.number}번)`;
   el.modalIncludeLate.checked = isPastLateThreshold();
   el.modalGuidanceMemo.value = "";
 
@@ -1382,7 +1391,7 @@ function bindEvents() {
 
     const lines = [
       `[${state.activeDate} 미등교 현황 (${absent.length}명)]`,
-      ...absent.map((s) => `- ${s.id} ${s.name} (${s.grade}학년 ${s.classNum}반)`)
+      ...absent.map((s) => `- ${formatStudentId(s)} ${s.name} (${s.grade}학년 ${s.classNum}반)`)
     ];
     const text = lines.join("\n");
     try {
@@ -1531,7 +1540,7 @@ function bindEvents() {
     const rows = records.map((r) => [
       state.activeDate,
       r.time || "",
-      r.studentId,
+      formatStudentId(r),
       r.grade,
       r.classNum,
       r.number,
@@ -1560,7 +1569,7 @@ function bindEvents() {
       const status = att ? (att.late || att.status === "late" ? "지각" : "등교") : "미등교";
       return [
         state.activeDate,
-        s.id,
+        formatStudentId(s),
         s.grade,
         s.classNum,
         s.number,
@@ -1643,8 +1652,9 @@ function bindEvents() {
     if (!rawId || !name) return;
 
     const parsed = parseStudentId(rawId);
+    const normalizedId = buildStudentId(parsed.grade, parsed.classNum, parsed.number) || rawId;
     await db.upsertStudent({
-      id: rawId,
+      id: normalizedId,
       grade: parsed.grade,
       classNum: parsed.classNum,
       number: parsed.number,
@@ -1652,7 +1662,7 @@ function bindEvents() {
     });
     el.newStudentId.value = "";
     el.newStudentName.value = "";
-    showToast(`${rawId} ${name} 학생이 추가되었습니다.`, "success");
+    showToast(`${normalizedId} ${name} 학생이 추가되었습니다.`, "success");
   });
 
   el.schoolSettingsForm.addEventListener("submit", async (e) => {

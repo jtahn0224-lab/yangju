@@ -168,7 +168,7 @@
               <input
                 id="gate-search-input"
                 type="search"
-                placeholder="학번(10101), 이름(김민수), 초성(ㄱㅁㅅ) 입력..."
+                placeholder="학번(1101), 이름(김민수), 초성(ㄱㅁㅅ) 입력..."
                 autocomplete="off"
                 spellcheck="false"
               />
@@ -245,6 +245,23 @@
 
       <!-- 탭 3: 기록 조회 · 통계 · 내보내기 -->
       <section id="tab-records" class="tab-panel" aria-label="기록 및 통계" hidden>
+        <div class="stats-grid">
+          <div class="card">
+            <div class="card-header">
+              <h2>항목별 지도 통계</h2>
+              <span id="stats-date-label" class="badge-soft">오늘</span>
+            </div>
+            <div id="item-stats-bars" class="bar-chart"></div>
+          </div>
+
+          <div class="card">
+            <div class="card-header">
+              <h2>학년·반별 지각/지도 현황</h2>
+            </div>
+            <div id="class-stats-list" class="mini-stat-list"></div>
+          </div>
+        </div>
+
         <!-- 반복 체크 학생 현황 (집중 지도 대상) -->
         <div class="card repeat-card mb-16">
           <div class="card-header wrap-header">
@@ -314,23 +331,6 @@
           </div>
 
           <div id="repeat-students-list" class="repeat-list" aria-live="polite"></div>
-        </div>
-
-        <div class="stats-grid">
-          <div class="card">
-            <div class="card-header">
-              <h2>항목별 지도 통계</h2>
-              <span id="stats-date-label" class="badge-soft">오늘</span>
-            </div>
-            <div id="item-stats-bars" class="bar-chart"></div>
-          </div>
-
-          <div class="card">
-            <div class="card-header">
-              <h2>학년·반별 지각/지도 현황</h2>
-            </div>
-            <div id="class-stats-list" class="mini-stat-list"></div>
-          </div>
         </div>
 
         <div class="card">
@@ -422,11 +422,11 @@
 
             <h3 class="sub-heading">학생 개별 추가</h3>
             <form id="add-student-form" class="inline-form">
-              <input id="new-student-id" type="text" placeholder="학번 (예: 10101)" required maxlength="10" />
+              <input id="new-student-id" type="text" placeholder="학번 (예: 1111)" required maxlength="10" />
               <input id="new-student-name" type="text" placeholder="이름 (예: 김민수)" required maxlength="20" />
               <button type="submit" class="btn btn-primary btn-sm">추가</button>
             </form>
-            <p class="form-hint">5자리 학번(예: 10215 → 1학년 2반 15번) 또는 4자리 학번(1205 → 1학년 2반 5번)을 입력하면 학년·반·번호가 자동 분리됩니다.</p>
+            <p class="form-hint">10개 반 미만은 4자리(예: 1111 → 1학년 1반 11번), 10반 이상은 5자리(예: 11011)로 자동 표시·분리됩니다.</p>
           </div>
 
           <!-- 학교 설정 & 지도 항목 관리 -->
