@@ -25,7 +25,9 @@ const state = {
     schoolName: "OO학교 교문지도",
     lateTime: "08:30",
     pinHash: null,
-    guidanceItems: []
+    guidanceItems: [],
+    repeatThresholdDays: 3,
+    repeatPeriodDays: 30
   },
   studentsMap: {},
   studentsList: [],
@@ -34,6 +36,9 @@ const state = {
     attendance: {},
     records: {}
   },
+  rangeDailyMap: {},
+  repeatCategory: "all", // "all" | "late" | "guidance"
+  repeatLoading: false,
   activeTab: "gate",
   gateSearch: "",
   gateGradeFilter: "all",
@@ -45,6 +50,8 @@ const state = {
   pendingUpload: null,
   modalStudentId: null
 };
+
+let lastFetchedPeriodKey = "";
 
 // DOM 참조 캐싱
 const el = {
@@ -101,7 +108,18 @@ const el = {
   attendanceProgressBar: document.getElementById("attendance-progress-bar"),
   attendanceGrid: document.getElementById("attendance-grid"),
 
-  // 탭 3: 기록·통계
+  // 탭 3: 기록·통계 & 반복 체크 학생
+  repeatCountBadge: document.getElementById("repeat-count-badge"),
+  repeatRuleSummary: document.getElementById("repeat-rule-summary"),
+  copyRepeatBtn: document.getElementById("copy-repeat-btn"),
+  exportRepeatCsvBtn: document.getElementById("export-repeat-csv-btn"),
+  repeatThresholdButtons: document.getElementById("repeat-threshold-buttons"),
+  repeatCustomDaysForm: document.getElementById("repeat-custom-days-form"),
+  repeatCustomDaysInput: document.getElementById("repeat-custom-days-input"),
+  repeatPeriodButtons: document.getElementById("repeat-period-buttons"),
+  repeatCategoryButtons: document.getElementById("repeat-category-buttons"),
+  repeatStudentsList: document.getElementById("repeat-students-list"),
+
   statsDateLabel: document.getElementById("stats-date-label"),
   itemStatsBars: document.getElementById("item-stats-bars"),
   classStatsList: document.getElementById("class-stats-list"),
@@ -221,6 +239,21 @@ function sortStudents(studentsMap) {
   });
 }
 
+function formatPeriodLabel(periodDays) {
+  return periodDays === "all" ? "전체 기간" : `최근 ${periodDays}일`;
+}
+
+function formatCategoryLabel(category) {
+  if (category === "late") return "지각";
+  if (category === "guidance") return "생활규정 지도";
+  return "지각·생활규정 지도";
+}
+
+function formatShortDate(dateStr) {
+  const parts = String(dateStr).split("-");
+  return parts.length === 3 ? `${parts[1]}-${parts[2]}` : dateStr;
+}
+
 /* ============================================================
    교사 접속 / 세션 관리
    ============================================================ */
@@ -286,6 +319,7 @@ function enterApp(teacherName) {
   el.loginScreen.hidden = true;
   el.appShell.hidden = false;
   renderAll();
+  refreshRepeatStudentsData(true);
 }
 
 function exitApp() {
@@ -296,6 +330,238 @@ function exitApp() {
   el.pinInput.value = "";
   el.loginError.hidden = true;
   renderRecentTeachers();
+}
+
+/* ============================================================
+   반복 체크 학생 집계 로직
+   ============================================================ */
+
+async function refreshRepeatStudentsData(force = false) {
+  const period = state.settings.repeatPeriodDays ?? 30;
+  const fetchKey = `${state.activeDate}|${period}`;
+  if (!force && fetchKey === lastFetchedPeriodKey && Object.keys(state.rangeDailyMap).length > 0) {
+    renderRepeatStudents();
+    return;
+  }
+
+  state.repeatLoading = true;
+  renderRepeatStudents();
+
+  try {
+    const data = await db.fetchDailyRange(state.activeDate, period);
+    state.rangeDailyMap = data || {};
+    state.rangeDailyMap[state.activeDate] = state.daily;
+    lastFetchedPeriodKey = fetchKey;
+  } catch (err) {
+    console.error("[RepeatStats] 기간 데이터 조회 실패:", err);
+  } finally {
+    state.repeatLoading = false;
+    renderRepeatStudents();
+  }
+}
+
+function computeRepeatStudents() {
+  const threshold = Number(state.settings.repeatThresholdDays) || 3;
+  const category = state.repeatCategory || "all";
+  const byStudent = new Map();
+
+  function ensureEntry(studentId, fallback = {}) {
+    if (!byStudent.has(studentId)) {
+      const rosterInfo = state.studentsMap[studentId] || {};
+      byStudent.set(studentId, {
+        studentId,
+        studentName: rosterInfo.name || fallback.studentName || studentId,
+        grade: rosterInfo.grade ?? fallback.grade ?? "",
+        classNum: rosterInfo.classNum ?? fallback.classNum ?? "",
+        number: rosterInfo.number ?? fallback.number ?? "",
+        lateDates: new Set(),
+        guidanceDates: new Set(),
+        lateCount: 0,
+        guidanceCount: 0,
+        itemCounts: new Map()
+      });
+    }
+    return byStudent.get(studentId);
+  }
+
+  for (const [dateStr, dayData] of Object.entries(state.rangeDailyMap || {})) {
+    if (!dayData) continue;
+
+    const records = Object.values(dayData.records || {});
+    const attendance = dayData.attendance || {};
+
+    for (const rec of records) {
+      if (!rec || !rec.studentId) continue;
+      const entry = ensureEntry(String(rec.studentId), rec);
+      const isLate = rec.type === "late" || Boolean(rec.includeLate);
+      const hasItems = Array.isArray(rec.items) && rec.items.length > 0;
+      const isGuidance = rec.type === "guidance" || hasItems;
+
+      if (isLate) {
+        entry.lateDates.add(dateStr);
+        entry.lateCount++;
+      }
+      if (isGuidance) {
+        entry.guidanceDates.add(dateStr);
+        entry.guidanceCount++;
+        for (const item of rec.items || []) {
+          entry.itemCounts.set(item, (entry.itemCounts.get(item) || 0) + 1);
+        }
+      }
+    }
+
+    // 기록에는 없지만 출석에 지각으로 남아있는 경우 보완
+    for (const [sid, att] of Object.entries(attendance)) {
+      if (!att || !(att.late || att.status === "late")) continue;
+      const entry = ensureEntry(String(sid));
+      if (!entry.lateDates.has(dateStr)) {
+        entry.lateDates.add(dateStr);
+        entry.lateCount++;
+      }
+    }
+  }
+
+  const results = [];
+  for (const entry of byStudent.values()) {
+    let matchedDates;
+    if (category === "late") {
+      matchedDates = new Set(entry.lateDates);
+    } else if (category === "guidance") {
+      matchedDates = new Set(entry.guidanceDates);
+    } else {
+      matchedDates = new Set([...entry.lateDates, ...entry.guidanceDates]);
+    }
+
+    if (matchedDates.size < threshold) continue;
+
+    const sortedDates = [...matchedDates].sort((a, b) => b.localeCompare(a));
+    const topItems = [...entry.itemCounts.entries()].sort((a, b) => b[1] - a[1]);
+
+    results.push({
+      studentId: entry.studentId,
+      studentName: entry.studentName,
+      grade: entry.grade,
+      classNum: entry.classNum,
+      number: entry.number,
+      daysCount: matchedDates.size,
+      lateDays: entry.lateDates.size,
+      guidanceDays: entry.guidanceDates.size,
+      lateCount: entry.lateCount,
+      guidanceCount: entry.guidanceCount,
+      totalCount:
+        category === "late"
+          ? entry.lateCount
+          : category === "guidance"
+          ? entry.guidanceCount
+          : entry.lateCount + entry.guidanceCount,
+      dates: sortedDates,
+      topItems
+    });
+  }
+
+  results.sort((a, b) => {
+    if (b.daysCount !== a.daysCount) return b.daysCount - a.daysCount;
+    if (b.totalCount !== a.totalCount) return b.totalCount - a.totalCount;
+    return String(a.studentId).localeCompare(String(b.studentId));
+  });
+
+  return results;
+}
+
+function renderRepeatControls() {
+  const threshold = Number(state.settings.repeatThresholdDays) || 3;
+  const period = state.settings.repeatPeriodDays ?? 30;
+  const presets = [2, 3, 4, 5, 7];
+
+  el.repeatThresholdButtons.querySelectorAll("[data-repeat-days]").forEach((btn) => {
+    const val = Number(btn.dataset.repeatDays);
+    btn.classList.toggle("active", val === threshold);
+  });
+
+  if (!presets.includes(threshold)) {
+    el.repeatCustomDaysInput.value = String(threshold);
+  } else if (document.activeElement !== el.repeatCustomDaysInput) {
+    el.repeatCustomDaysInput.value = "";
+  }
+
+  el.repeatPeriodButtons.querySelectorAll("[data-repeat-period]").forEach((btn) => {
+    const val = btn.dataset.repeatPeriod;
+    btn.classList.toggle("active", String(period) === val);
+  });
+
+  el.repeatCategoryButtons.querySelectorAll("[data-repeat-category]").forEach((btn) => {
+    btn.classList.toggle("active", btn.dataset.repeatCategory === state.repeatCategory);
+  });
+
+  el.repeatRuleSummary.textContent = `${formatPeriodLabel(period)} (기준일 ${state.activeDate}) 동안 ${threshold}일 이상 ${formatCategoryLabel(state.repeatCategory)} 체크된 학생을 표시합니다.`;
+}
+
+function renderRepeatStudents() {
+  renderRepeatControls();
+
+  if (state.repeatLoading) {
+    el.repeatCountBadge.textContent = "집계 중...";
+    el.repeatStudentsList.innerHTML = `<div class="empty-state" style="grid-column:1/-1">기간별 기록을 불러오는 중입니다...</div>`;
+    return;
+  }
+
+  const threshold = Number(state.settings.repeatThresholdDays) || 3;
+  const period = state.settings.repeatPeriodDays ?? 30;
+  const list = computeRepeatStudents();
+
+  el.repeatCountBadge.textContent = `${list.length}명 해당`;
+
+  if (list.length === 0) {
+    el.repeatStudentsList.innerHTML = `
+      <div class="empty-state" style="grid-column:1/-1">
+        <strong>${escapeHtml(formatPeriodLabel(period))} 동안 ${threshold}일 이상 반복 체크된 학생이 없습니다.</strong>
+        <p>위의 기준 일수 버튼(예: 2일 이상)이나 집계 기간을 조정해 확인할 수 있습니다.</p>
+      </div>
+    `;
+    return;
+  }
+
+  el.repeatStudentsList.innerHTML = list
+    .map((item, index) => {
+      const isHigh = item.daysCount >= threshold + 2 || item.daysCount >= 5;
+      const classText =
+        item.grade && item.classNum
+          ? `${item.grade}학년 ${item.classNum}반${item.number ? ` ${item.number}번` : ""}`
+          : "";
+
+      const pills = [];
+      if (item.lateDays > 0 && state.repeatCategory !== "guidance") {
+        pills.push(`<span class="pill-mini pill-late">지각 ${item.lateDays}일 (${item.lateCount}건)</span>`);
+      }
+      if (item.guidanceDays > 0 && state.repeatCategory !== "late") {
+        pills.push(`<span class="pill-mini pill-guidance">생활지도 ${item.guidanceDays}일 (${item.guidanceCount}건)</span>`);
+      }
+      if (state.repeatCategory !== "late") {
+        for (const [label, cnt] of item.topItems.slice(0, 3)) {
+          pills.push(`<span class="pill-mini pill-neutral">${escapeHtml(label)} ${cnt}회</span>`);
+        }
+      }
+
+      const shownDates = item.dates.slice(0, 6).map(formatShortDate).join(", ");
+      const moreDates = item.dates.length > 6 ? ` 외 ${item.dates.length - 6}일` : "";
+
+      return `
+        <div class="repeat-item ${isHigh ? "is-high" : ""}">
+          <div class="repeat-item-top">
+            <div class="repeat-student-wrap">
+              <span class="repeat-rank">#${index + 1}</span>
+              <span class="student-id-badge">${escapeHtml(item.studentId)}</span>
+              <strong class="student-name">${escapeHtml(item.studentName)}</strong>
+              ${classText ? `<span class="text-muted" style="font-size:0.78rem">${escapeHtml(classText)}</span>` : ""}
+            </div>
+            <span class="repeat-days-badge">${item.daysCount}일 누적</span>
+          </div>
+          <div class="repeat-tags">${pills.join("")}</div>
+          <div class="repeat-dates">체크일: ${escapeHtml(shownDates)}${escapeHtml(moreDates)}</div>
+        </div>
+      `;
+    })
+    .join("");
 }
 
 /* ============================================================
@@ -366,6 +632,7 @@ function renderSettingsUI() {
     .join("");
 
   updateClock();
+  renderRepeatControls();
 }
 
 function renderSummaryCounters() {
@@ -533,7 +800,6 @@ function renderLiveFeed() {
 function renderAttendanceTab() {
   renderGradeFilters(el.attGradeChips, state.attGradeFilter, "data-att-grade");
 
-  // 선택된 학년의 반 목록
   const classCandidates = state.studentsList.filter(
     (s) => state.attGradeFilter === "all" || String(s.grade) === String(state.attGradeFilter)
   );
@@ -622,6 +888,8 @@ function renderAttendanceTab() {
 }
 
 function renderRecordsTab() {
+  renderRepeatStudents();
+
   const records = getSortedRecords();
   el.statsDateLabel.textContent = state.activeDate;
 
@@ -854,7 +1122,6 @@ async function submitGuidanceModal(e) {
   const time = getCurrentTimeString();
   const timestamp = Date.now();
 
-  // 지각 체크 또는 아직 미등교 상태면 출석 자동 기록
   const existingAtt = state.daily.attendance?.[stu.id];
   if (includeLate) {
     await db.setAttendance(state.activeDate, stu.id, {
@@ -910,6 +1177,10 @@ function switchTab(tabName) {
     if (isTarget) btn.setAttribute("aria-current", "page");
     else btn.removeAttribute("aria-current");
   });
+
+  if (tabName === "records") {
+    refreshRepeatStudentsData(true);
+  }
 }
 
 function setupDialogLightDismiss(dialog) {
@@ -918,8 +1189,35 @@ function setupDialogLightDismiss(dialog) {
   });
 }
 
+async function applyRepeatThresholdDays(days) {
+  const num = parseInt(days, 10);
+  if (Number.isNaN(num) || num < 1 || num > 365) {
+    showToast("반복 기준 일수는 1~365 사이의 숫자로 입력해 주세요.", "error");
+    return;
+  }
+  state.settings.repeatThresholdDays = num;
+  renderRepeatStudents();
+  try {
+    await db.updateSettings({ repeatThresholdDays: num });
+    showToast(`반복 기준이 '${num}일 이상'으로 저장되었습니다.`, "success");
+  } catch (err) {
+    console.error(err);
+    showToast("기준 일수 저장 중 오류가 발생했습니다.", "error");
+  }
+}
+
+async function applyRepeatPeriod(periodValue) {
+  const period = periodValue === "all" ? "all" : parseInt(periodValue, 10);
+  state.settings.repeatPeriodDays = period;
+  try {
+    await db.updateSettings({ repeatPeriodDays: period });
+  } catch (err) {
+    console.error(err);
+  }
+  await refreshRepeatStudentsData(true);
+}
+
 function bindEvents() {
-  // 다이얼로그 닫기 버튼 및 바깥 클릭 닫기
   document.querySelectorAll("[data-close-dialog]").forEach((btn) => {
     btn.addEventListener("click", () => {
       document.getElementById(btn.dataset.closeDialog)?.close();
@@ -928,13 +1226,11 @@ function bindEvents() {
   setupDialogLightDismiss(el.guidanceModal);
   setupDialogLightDismiss(el.setupGuideModal);
 
-  // Firebase 설정 가이드 모달 열기
   const openGuide = () => el.setupGuideModal.showModal();
   el.openSetupGuideBtn.addEventListener("click", openGuide);
   el.demoGuideBtn.addEventListener("click", openGuide);
   el.syncStatusBtn.addEventListener("click", openGuide);
 
-  // 최근 교사 칩 클릭
   el.recentTeachers.addEventListener("click", (e) => {
     const btn = e.target.closest("[data-recent-teacher]");
     if (!btn) return;
@@ -942,7 +1238,6 @@ function bindEvents() {
     el.pinInput.focus();
   });
 
-  // 교사 로그인 제출
   el.loginForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const teacherName = el.teacherNameInput.value.trim();
@@ -969,23 +1264,21 @@ function bindEvents() {
     showToast(`${teacherName} 선생님, 환영합니다!`, "success");
   });
 
-  // 로그아웃
   el.logoutBtn.addEventListener("click", () => {
     if (confirm("교사를 전환하거나 로그아웃하시겠습니까?")) {
       exitApp();
     }
   });
 
-  // 날짜 변경
   el.activeDateInput.value = state.activeDate;
   el.activeDateInput.addEventListener("change", () => {
     const nextDate = el.activeDateInput.value || getTodayDateString();
     state.activeDate = nextDate;
     db.subscribeDate(nextDate);
+    refreshRepeatStudentsData(true);
     showToast(`${nextDate} 기록을 불러왔습니다.`);
   });
 
-  // 하단 네비게이션
   document.querySelectorAll(".bottom-nav .nav-item").forEach((btn) => {
     btn.addEventListener("click", () => switchTab(btn.dataset.tab));
   });
@@ -1012,7 +1305,6 @@ function bindEvents() {
     renderGateTab();
   });
 
-  // 학생 액션 위임 (탭 1 & 탭 2 공통)
   const handleStudentAction = async (e) => {
     const btn = e.target.closest("[data-action]");
     if (!btn) return;
@@ -1029,7 +1321,6 @@ function bindEvents() {
   el.gateStudentList.addEventListener("click", handleStudentAction);
   el.attendanceGrid.addEventListener("click", handleStudentAction);
 
-  // 기록 삭제 위임 (피드 & 테이블 공통)
   const handleDeleteRecord = async (e) => {
     const btn = e.target.closest("[data-delete-record]");
     if (!btn) return;
@@ -1041,7 +1332,6 @@ function bindEvents() {
   el.liveFeedList.addEventListener("click", handleDeleteRecord);
   el.recordsTableBody.addEventListener("click", handleDeleteRecord);
 
-  // 지도 모달 칩 토글 & 제출
   el.modalGuidanceChips.addEventListener("click", (e) => {
     const btn = e.target.closest(".select-chip");
     if (!btn) return;
@@ -1077,7 +1367,6 @@ function bindEvents() {
     });
   });
 
-  // 미등교 명단 복사
   el.copyAbsentBtn.addEventListener("click", async () => {
     const attendance = state.daily.attendance || {};
     const absent = state.studentsList.filter((s) => {
@@ -1104,7 +1393,6 @@ function bindEvents() {
     }
   });
 
-  // 현재 반 전체 등교 처리
   el.markClassPresentBtn.addEventListener("click", async () => {
     if (state.attGradeFilter === "all" || state.attClassFilter === "all") {
       showToast("먼저 학년과 반을 선택해 주세요.", "error");
@@ -1139,7 +1427,91 @@ function bindEvents() {
     showToast(`${targets.length}명 일괄 등교 처리 완료!`, "success");
   });
 
-  // 탭 3: 기록 필터 & CSV 다운로드
+  // 탭 3: 반복 체크 학생 컨트롤 (기준 일수 / 기간 / 유형 / 복사 / CSV)
+  el.repeatThresholdButtons.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-repeat-days]");
+    if (!btn) return;
+    applyRepeatThresholdDays(btn.dataset.repeatDays);
+  });
+
+  el.repeatCustomDaysForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    applyRepeatThresholdDays(el.repeatCustomDaysInput.value);
+  });
+
+  el.repeatPeriodButtons.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-repeat-period]");
+    if (!btn) return;
+    applyRepeatPeriod(btn.dataset.repeatPeriod);
+  });
+
+  el.repeatCategoryButtons.addEventListener("click", (e) => {
+    const btn = e.target.closest("[data-repeat-category]");
+    if (!btn) return;
+    state.repeatCategory = btn.dataset.repeatCategory;
+    renderRepeatStudents();
+  });
+
+  el.copyRepeatBtn.addEventListener("click", async () => {
+    const list = computeRepeatStudents();
+    const threshold = Number(state.settings.repeatThresholdDays) || 3;
+    const period = formatPeriodLabel(state.settings.repeatPeriodDays ?? 30);
+
+    if (list.length === 0) {
+      showToast("복사할 반복 체크 대상 학생이 없습니다.", "error");
+      return;
+    }
+
+    const lines = [
+      `[반복 체크 학생 현황 - ${period} / ${threshold}일 이상 (${list.length}명)]`,
+      ...list.map((s) => {
+        const itemsText = s.topItems.map(([k, v]) => `${k} ${v}회`).join(", ");
+        return `- ${s.studentId} ${s.studentName}: 총 ${s.daysCount}일 (지각 ${s.lateDays}일, 생활지도 ${s.guidanceDays}일${itemsText ? ` · ${itemsText}` : ""})`;
+      })
+    ];
+    const text = lines.join("\n");
+    try {
+      await navigator.clipboard.writeText(text);
+      showToast(`반복 체크 학생 ${list.length}명 명단이 복사되었습니다.`, "success");
+    } catch {
+      prompt("아래 명단을 복사하세요:", text);
+    }
+  });
+
+  el.exportRepeatCsvBtn.addEventListener("click", () => {
+    const list = computeRepeatStudents();
+    const threshold = Number(state.settings.repeatThresholdDays) || 3;
+    const period = formatPeriodLabel(state.settings.repeatPeriodDays ?? 30);
+
+    if (list.length === 0) {
+      showToast("내보낼 반복 체크 대상 학생이 없습니다.", "error");
+      return;
+    }
+
+    const rows = list.map((s) => [
+      period,
+      `${threshold}일 이상`,
+      s.studentId,
+      s.grade,
+      s.classNum,
+      s.number,
+      s.studentName,
+      s.daysCount,
+      s.lateDays,
+      s.guidanceDays,
+      s.topItems.map(([k, v]) => `${k}(${v})`).join(" / "),
+      s.dates.join(", ")
+    ]);
+
+    downloadCsv(
+      `반복체크학생_${state.activeDate}_${threshold}일이상.csv`,
+      ["집계기간", "반복기준", "학번", "학년", "반", "번호", "이름", "누적일수", "지각일수", "생활지도일수", "주요지도항목", "체크날짜목록"],
+      rows
+    );
+    showToast("반복 체크 학생 CSV 파일이 다운로드되었습니다.", "success");
+  });
+
+  // 탭 3: 상세 기록 필터 & CSV 다운로드
   el.recordTypeFilter.addEventListener("change", () => {
     state.recordTypeFilter = el.recordTypeFilter.value;
     renderRecordsTab();
@@ -1223,7 +1595,6 @@ function bindEvents() {
     showToast("샘플 CSV 양식이 다운로드되었습니다.");
   });
 
-  // 드롭존 클릭 & 드래그 앤 드롭
   el.rosterDropzone.addEventListener("click", () => el.rosterFileInput.click());
   el.rosterDropzone.addEventListener("dragover", (e) => {
     e.preventDefault();
@@ -1265,7 +1636,6 @@ function bindEvents() {
     showToast("학생 명단이 삭제되었습니다.");
   });
 
-  // 개별 학생 추가
   el.addStudentForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const rawId = el.newStudentId.value.trim().replace(/[.#$[\]/\s]/g, "");
@@ -1285,7 +1655,6 @@ function bindEvents() {
     showToast(`${rawId} ${name} 학생이 추가되었습니다.`, "success");
   });
 
-  // 학교 설정 저장
   el.schoolSettingsForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const schoolName = el.settingSchoolName.value.trim();
@@ -1306,7 +1675,6 @@ function bindEvents() {
     showToast("학교 설정이 실시간으로 반영되었습니다.", "success");
   });
 
-  // 지도 항목 추가/삭제
   el.addGuidanceItemForm.addEventListener("submit", async (e) => {
     e.preventDefault();
     const label = el.newItemLabel.value.trim();
@@ -1365,8 +1733,14 @@ async function bootstrap() {
   });
 
   db.on("settings", (settings) => {
+    const prevPeriod = state.settings.repeatPeriodDays;
     state.settings = settings;
     renderSettingsUI();
+    if (prevPeriod !== settings.repeatPeriodDays) {
+      refreshRepeatStudentsData(true);
+    } else {
+      renderRepeatStudents();
+    }
   });
 
   db.on("students", (studentsMap) => {
@@ -1380,6 +1754,7 @@ async function bootstrap() {
 
   db.on("daily", (dailyData) => {
     state.daily = dailyData || { attendance: {}, records: {} };
+    state.rangeDailyMap[state.activeDate] = state.daily;
     renderSummaryCounters();
     renderGateTab();
     renderAttendanceTab();
@@ -1389,11 +1764,9 @@ async function bootstrap() {
   await db.init();
   db.subscribeDate(state.activeDate);
 
-  // 시계 1초마다 갱신
   updateClock();
   setInterval(updateClock, 1000);
 
-  // 저장된 교사 세션이 있으면 자동 접속
   const saved = loadSavedSession();
   if (saved) {
     enterApp(saved.teacherName);

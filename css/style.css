@@ -72,9 +72,8 @@ button {
   display: none !important;
 }
 
-.mt-12 {
-  margin-top: 12px;
-}
+.mt-12 { margin-top: 12px; }
+.mb-16 { margin-bottom: 16px; }
 
 .text-success { color: var(--success); }
 .text-danger { color: var(--danger); }
@@ -171,6 +170,7 @@ input[type="password"],
 input[type="search"],
 input[type="date"],
 input[type="time"],
+input[type="number"],
 select {
   width: 100%;
   min-height: 44px;
@@ -249,7 +249,7 @@ select:focus {
 }
 
 .btn-xs {
-  min-height: 28px;
+  min-height: 30px;
   padding: 0 10px;
   font-size: 0.78rem;
 }
@@ -605,6 +605,13 @@ select:focus {
   flex-wrap: wrap;
 }
 
+.title-with-badge {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
 .card-header h2 {
   margin: 0;
   font-size: 1.05rem;
@@ -627,10 +634,162 @@ select:focus {
   white-space: nowrap;
 }
 
+.badge-danger-soft {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--danger);
+  background: var(--danger-bg);
+  border: 1px solid var(--danger-border);
+  padding: 3px 10px;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
 .header-btn-group {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+
+/* ---------- 반복 체크 학생 현황 카드 ---------- */
+.repeat-card {
+  border-color: var(--danger-border);
+  background: linear-gradient(180deg, #fffafa 0%, #ffffff 90px);
+}
+
+.repeat-controls {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  margin-bottom: 14px;
+}
+
+.control-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.control-label {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--text-secondary);
+}
+
+.control-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.control-split {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 12px;
+}
+
+@media (min-width: 760px) {
+  .control-split {
+    grid-template-columns: 1.15fr 0.85fr;
+  }
+}
+
+.custom-day-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.custom-day-inline input[type="number"] {
+  width: 82px;
+  min-height: 34px;
+  padding: 4px 8px;
+  font-size: 0.84rem;
+  text-align: center;
+}
+
+.repeat-list {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+@media (min-width: 760px) {
+  .repeat-list {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+
+.repeat-item {
+  border: 1.5px solid var(--border);
+  border-left: 4px solid var(--warning);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.repeat-item.is-high {
+  border-color: var(--danger-border);
+  border-left-color: var(--danger);
+  background: #fffbfb;
+}
+
+.repeat-item-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.repeat-student-wrap {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.repeat-rank {
+  font-size: 0.74rem;
+  font-weight: 800;
+  color: var(--text-muted);
+}
+
+.repeat-days-badge {
+  font-size: 0.8rem;
+  font-weight: 800;
+  padding: 3px 10px;
+  border-radius: 999px;
+  background: var(--warning-bg);
+  color: var(--warning);
+  white-space: nowrap;
+}
+
+.repeat-item.is-high .repeat-days-badge {
+  background: var(--danger);
+  color: #ffffff;
+}
+
+.repeat-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.repeat-dates {
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
 }
 
 /* ---------- 검색바 & 칩 ---------- */
@@ -799,6 +958,12 @@ select:focus {
 .pill-guidance {
   background: var(--warning-bg);
   color: var(--warning);
+}
+
+.pill-neutral {
+  background: var(--surface-alt);
+  border: 1px solid var(--border);
+  color: var(--text-secondary);
 }
 
 .quick-actions {

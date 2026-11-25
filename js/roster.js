@@ -4,9 +4,6 @@
 
 import { parseStudentId } from "./hangul.js";
 
-/**
- * 테스트용 샘플 학생 30명 (1학년 1반, 1학년 2반, 2학년 1반)
- */
 export function getSampleStudentsMap() {
   const sample = [
     ["10101", 1, 1, 1, "김민수"],
@@ -48,9 +45,6 @@ export function getSampleStudentsMap() {
   return map;
 }
 
-/**
- * 안전한 CSV 셀 포맷팅 (쉼표/따옴표 이스케이프 + 수식 인젝션 방지)
- */
 function csvCell(value) {
   let str = String(value ?? "");
   if (/^[=+\-@\t\r]/.test(str)) {
@@ -62,9 +56,6 @@ function csvCell(value) {
   return str;
 }
 
-/**
- * UTF-8 BOM 포함 CSV 파일 다운로드 (엑셀 한글 깨짐 방지)
- */
 export function downloadCsv(filename, headers, rows) {
   const lines = [
     headers.map(csvCell).join(","),
@@ -83,18 +74,12 @@ export function downloadCsv(filename, headers, rows) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-/**
- * 샘플 학생 명단 CSV 양식 다운로드
- */
 export function downloadSampleRosterCsv() {
   const sampleMap = getSampleStudentsMap();
   const rows = Object.values(sampleMap).map((s) => [s.id, s.grade, s.classNum, s.number, s.name]);
   downloadCsv("학생명단_샘플양식.csv", ["학번", "학년", "반", "번호", "이름"], rows);
 }
 
-/**
- * CSV 텍스트를 2차원 배열로 파싱 (RFC 4180 호환)
- */
 function parseCsvText(text) {
   const rows = [];
   let row = [];
@@ -141,9 +126,6 @@ function parseCsvText(text) {
   return rows;
 }
 
-/**
- * ArrayBuffer에서 UTF-8 또는 EUC-KR(나이스 엑셀 CSV) 자동 판별 디코딩
- */
 function decodeCsvBuffer(buffer) {
   const utf8 = new TextDecoder("utf-8", { fatal: false }).decode(buffer);
   if (!utf8.includes("\uFFFD")) {
@@ -156,15 +138,11 @@ function decodeCsvBuffer(buffer) {
   }
 }
 
-/**
- * 2차원 테이블 데이터를 학생 객체 맵으로 변환
- */
 function rowsToStudentMap(rows) {
   if (!rows || rows.length === 0) {
     throw new Error("파일에 데이터가 없습니다.");
   }
 
-  // 헤더 행 판별
   const firstRow = rows[0].map((v) => String(v ?? "").trim().toLowerCase());
   const hasHeader = firstRow.some((cell) =>
     ["학번", "이름", "성명", "학생명", "학년", "반", "번호", "name", "id"].some((k) =>
@@ -187,7 +165,6 @@ function rowsToStudentMap(rows) {
       else if (idxName === -1 && (col.includes("이름") || col.includes("성명") || col.includes("학생") || col.includes("name"))) idxName = i;
     });
   } else {
-    // 헤더가 없으면 열 개수에 따라 추정: [학번, 이름] 또는 [학번, 학년, 반, 번호, 이름] 또는 [학년, 반, 번호, 이름]
     const colCount = rows[0].length;
     if (colCount === 2) {
       idxId = 0;
@@ -237,7 +214,6 @@ function rowsToStudentMap(rows) {
       continue;
     }
 
-    // Firebase 키 금지 문자(., #, $, [, ], /) 제거
     const safeId = rawId.replace(/[.#$[\]/\s]/g, "");
     if (!safeId) {
       skipped++;
@@ -261,9 +237,6 @@ function rowsToStudentMap(rows) {
   return { studentMap, count, skipped };
 }
 
-/**
- * 업로드된 엑셀(.xlsx/.xls) 또는 CSV 파일 파싱
- */
 export async function parseRosterFile(file) {
   const ext = file.name.split(".").pop().toLowerCase();
   const buffer = await file.arrayBuffer();

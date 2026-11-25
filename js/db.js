@@ -4,6 +4,7 @@
  * ============================================================
  * - FIREBASE_CONFIG가 설정되어 있으면 Firebase Realtime Database로 실시간 동기화
  * - 미설정 상태이면 localStorage + 브라우저 탭 간 storage 이벤트로 즉시 체험 가능
+ * - 기간별(최근 N일 / 전체 기간) 누적 조회 지원 (반복 체크 학생 집계용)
  */
 
 import { FIREBASE_CONFIG, DEFAULT_SETTINGS, isFirebaseConfigured } from "./firebase-config.js";
@@ -23,7 +24,6 @@ export async function hashPin(pin) {
       .map((b) => b.toString(16).padStart(2, "0"))
       .join("");
   }
-  // Fallback FNV-1a 64-bit style hex hash for non-HTTPS local testing
   let h1 = 0xdeadbeef;
   let h2 = 0x41c6ce57;
   for (let i = 0; i < text.length; i++) {
@@ -36,13 +36,28 @@ export async function hashPin(pin) {
   return `fb-${(h2 >>> 0).toString(16).padStart(8, "0")}${(h1 >>> 0).toString(16).padStart(8, "0")}`;
 }
 
+/**
+ * YYYY-MM-DD 문자열에서 N일 전 날짜 문자열 계산
+ */
+function subtractDays(dateStr, days) {
+  const [y, m, d] = dateStr.split("-").map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  dt.setDate(dt.getDate() - days);
+  const ny = dt.getFullYear();
+  const nm = String(dt.getMonth() + 1).padStart(2, "0");
+  const nd = String(dt.getDate()).padStart(2, "0");
+  return `${ny}-${nm}-${nd}`;
+}
+
 function createEmptyLocalStore() {
   return {
     settings: {
       schoolName: DEFAULT_SETTINGS.schoolName,
       lateTime: DEFAULT_SETTINGS.lateTime,
       pinHash: null,
-      guidanceItems: [...DEFAULT_SETTINGS.guidanceItems]
+      guidanceItems: [...DEFAULT_SETTINGS.guidanceItems],
+      repeatThresholdDays: 3,
+      repeatPeriodDays: 30
     },
     students: {},
     daily: {}
@@ -76,9 +91,15 @@ function normalizeSettings(raw) {
     schoolName: DEFAULT_SETTINGS.schoolName,
     lateTime: DEFAULT_SETTINGS.lateTime,
     pinHash: null,
-    guidanceItems: [...DEFAULT_SETTINGS.guidanceItems]
+    guidanceItems: [...DEFAULT_SETTINGS.guidanceItems],
+    repeatThresholdDays: 3,
+    repeatPeriodDays: 30
   };
   if (!raw) return base;
+
+  const threshold = Number(raw.repeatThresholdDays);
+  const period = raw.repeatPeriodDays === "all" ? "all" : Number(raw.repeatPeriodDays);
+
   return {
     schoolName: raw.schoolName || base.schoolName,
     lateTime: raw.lateTime || base.lateTime,
@@ -86,16 +107,21 @@ function normalizeSettings(raw) {
     guidanceItems:
       Array.isArray(raw.guidanceItems) && raw.guidanceItems.length > 0
         ? raw.guidanceItems
-        : base.guidanceItems
+        : base.guidanceItems,
+    repeatThresholdDays:
+      Number.isInteger(threshold) && threshold >= 1 && threshold <= 365
+        ? threshold
+        : base.repeatThresholdDays,
+    repeatPeriodDays:
+      period === "all" || (Number.isInteger(period) && period >= 1 && period <= 365)
+        ? period
+        : base.repeatPeriodDays
   };
 }
 
-/**
- * 실시간 DB 서비스 클래스
- */
 export class GateDatabase {
   constructor() {
-    this.mode = "demo"; // "firebase" | "demo"
+    this.mode = "demo";
     this.connected = false;
     this.db = null;
     this.fbMod = null;
@@ -144,7 +170,6 @@ export class GateDatabase {
       this.fbMod = dbMod;
       this.mode = "firebase";
 
-      // 익명 인증이 켜져 있으면 자동 인증 시도 (보안 규칙 강화 시 유용)
       try {
         const auth = authMod.getAuth(app);
         await authMod.signInAnonymously(auth);
@@ -152,19 +177,16 @@ export class GateDatabase {
         console.info("[Firebase] 익명 인증 미사용 또는 미활성화 상태로 계속 진행합니다:", authErr?.code || authErr);
       }
 
-      // 실시간 연결 상태 감지
       const connRef = dbMod.ref(this.db, ".info/connected");
       dbMod.onValue(connRef, (snap) => {
         this.connected = Boolean(snap.val());
         this._emit("connection", { mode: "firebase", connected: this.connected });
       });
 
-      // 설정 실시간 구독
       dbMod.onValue(dbMod.ref(this.db, "settings"), (snap) => {
         this._emit("settings", normalizeSettings(snap.val()));
       });
 
-      // 학생 명단 실시간 구독
       dbMod.onValue(dbMod.ref(this.db, "students"), (snap) => {
         this._emit("students", snap.val() || {});
       });
@@ -186,7 +208,6 @@ export class GateDatabase {
     this._emit("settings", normalizeSettings(store.settings));
     this._emit("students", store.students || {});
 
-    // 같은 브라우저 내 다른 탭 변경 시 즉시 실시간 동기화
     window.addEventListener("storage", (e) => {
       if (e.key !== LOCAL_STORAGE_KEY) return;
       const updated = readLocalStore();
@@ -198,9 +219,6 @@ export class GateDatabase {
     });
   }
 
-  /**
-   * 특정 날짜(YYYY-MM-DD)의 출석 및 지도 기록 실시간 구독
-   */
   subscribeDate(dateStr) {
     this.currentDate = dateStr;
 
@@ -229,8 +247,38 @@ export class GateDatabase {
   }
 
   /**
-   * 교사 PIN 검증 (DB에 저장된 해시가 없으면 기본 PIN '1234' 허용)
+   * 기간별 일자 데이터 일괄 조회 (반복 체크 학생 통계용)
+   * @param {string} endDateStr 기준 종료일 (YYYY-MM-DD)
+   * @param {number|"all"} periodDays 최근 며칠(예: 7, 14, 30) 또는 "all"
    */
+  async fetchDailyRange(endDateStr, periodDays = 30) {
+    const isAll = periodDays === "all" || !Number.isFinite(Number(periodDays));
+    const startDateStr = isAll ? null : subtractDays(endDateStr, Math.max(1, Number(periodDays)) - 1);
+
+    if (this.mode === "firebase" && this.db && this.fbMod) {
+      const dailyRoot = this.fbMod.ref(this.db, "daily");
+      const targetQuery = isAll
+        ? dailyRoot
+        : this.fbMod.query(
+            dailyRoot,
+            this.fbMod.orderByKey(),
+            this.fbMod.startAt(startDateStr),
+            this.fbMod.endAt(endDateStr)
+          );
+      const snap = await this.fbMod.get(targetQuery);
+      return snap.val() || {};
+    }
+
+    const store = readLocalStore();
+    const result = {};
+    for (const [dateKey, val] of Object.entries(store.daily || {})) {
+      if (isAll || (dateKey >= startDateStr && dateKey <= endDateStr)) {
+        result[dateKey] = val || { attendance: {}, records: {} };
+      }
+    }
+    return result;
+  }
+
   async verifyPin(inputPin, currentSettings) {
     const clean = String(inputPin || "").trim();
     if (!clean) return false;
@@ -242,9 +290,6 @@ export class GateDatabase {
     return clean === DEFAULT_SETTINGS.defaultPin;
   }
 
-  /**
-   * 학교/지각/PIN/지도항목 설정 업데이트
-   */
   async updateSettings(partial) {
     if (this.mode === "firebase" && this.db && this.fbMod) {
       await this.fbMod.update(this.fbMod.ref(this.db, "settings"), partial);
@@ -256,9 +301,6 @@ export class GateDatabase {
     this._emit("settings", normalizeSettings(store.settings));
   }
 
-  /**
-   * 학생 명단 저장 (replace: 덮어쓰기, merge: 병합)
-   */
   async saveStudents(studentMap, mode = "replace") {
     if (this.mode === "firebase" && this.db && this.fbMod) {
       const studentsRef = this.fbMod.ref(this.db, "students");
@@ -276,9 +318,6 @@ export class GateDatabase {
     this._emit("students", store.students);
   }
 
-  /**
-   * 개별 학생 추가/수정
-   */
   async upsertStudent(student) {
     const key = String(student.id);
     if (this.mode === "firebase" && this.db && this.fbMod) {
@@ -291,9 +330,6 @@ export class GateDatabase {
     this._emit("students", store.students);
   }
 
-  /**
-   * 명단 전체 삭제
-   */
   async clearStudents() {
     if (this.mode === "firebase" && this.db && this.fbMod) {
       await this.fbMod.remove(this.fbMod.ref(this.db, "students"));
@@ -305,9 +341,6 @@ export class GateDatabase {
     this._emit("students", {});
   }
 
-  /**
-   * 학생 출석 상태 설정 (present / late) 또는 해제(null)
-   */
   async setAttendance(dateStr, studentId, payload) {
     const sid = String(studentId);
     if (this.mode === "firebase" && this.db && this.fbMod) {
@@ -333,9 +366,6 @@ export class GateDatabase {
     }
   }
 
-  /**
-   * 반 전체 일괄 등교 처리
-   */
   async bulkSetAttendance(dateStr, attendanceMap) {
     if (this.mode === "firebase" && this.db && this.fbMod) {
       await this.fbMod.update(this.fbMod.ref(this.db, `daily/${dateStr}/attendance`), attendanceMap);
@@ -354,9 +384,6 @@ export class GateDatabase {
     }
   }
 
-  /**
-   * 지각 또는 생활규정 지도 기록 추가
-   */
   async addRecord(dateStr, record) {
     if (this.mode === "firebase" && this.db && this.fbMod) {
       const listRef = this.fbMod.ref(this.db, `daily/${dateStr}/records`);
@@ -376,9 +403,6 @@ export class GateDatabase {
     return id;
   }
 
-  /**
-   * 지도 기록 삭제 (실수 취소)
-   */
   async deleteRecord(dateStr, recordId) {
     if (this.mode === "firebase" && this.db && this.fbMod) {
       await this.fbMod.remove(this.fbMod.ref(this.db, `daily/${dateStr}/records/${recordId}`));

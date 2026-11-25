@@ -11,9 +11,6 @@ const CHOSEONG_LIST = [
 const HANGUL_START = 0xac00;
 const HANGUL_END = 0xd7a3;
 
-/**
- * 문자열에서 한글 초성만 추출 (비한글 문자는 그대로 유지)
- */
 export function extractChoseong(text = "") {
   let result = "";
   for (const ch of String(text)) {
@@ -28,16 +25,10 @@ export function extractChoseong(text = "") {
   return result;
 }
 
-/**
- * 검색어가 초성(자음)만으로 이루어져 있는지 확인
- */
 export function isChoseongOnly(query = "") {
   return /^[ㄱ-ㅎ\s]+$/.test(query);
 }
 
-/**
- * 학생 객체가 검색어와 일치하는지 판별
- */
 export function matchStudent(student, rawQuery) {
   const q = String(rawQuery || "").trim().toLowerCase();
   if (!q) return true;
@@ -60,11 +51,6 @@ export function matchStudent(student, rawQuery) {
   return false;
 }
 
-/**
- * 4~5자리 학번에서 학년/반/번호 자동 파싱
- * 예: "10215" -> { grade: 1, classNum: 2, number: 15 }
- *     "1205"  -> { grade: 1, classNum: 2, number: 5 }
- */
 export function parseStudentId(rawId) {
   const digits = String(rawId || "").replace(/\D/g, "");
   if (digits.length === 5) {
