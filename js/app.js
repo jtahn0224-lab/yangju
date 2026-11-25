@@ -656,6 +656,189 @@ function renderConnectionStatus() {
 
 const STATIC_LOGO_PATH = "./assets/school-logo.png";
 
+const DYNAMIC_THEME_VARS = [
+  "--bg",
+  "--surface-alt",
+  "--border",
+  "--border-strong",
+  "--primary",
+  "--primary-hover",
+  "--primary-soft",
+  "--primary-border",
+  "--primary-ring",
+  "--header-bg-start",
+  "--header-bg-mid",
+  "--header-bg-end",
+  "--accent-bg",
+  "--accent-border",
+  "--accent-tag-bg"
+];
+
+function rgbToHsl(r, g, b) {
+  r /= 255;
+  g /= 255;
+  b /= 255;
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  const l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      default:
+        h = (r - g) / d + 4;
+        break;
+    }
+    h *= 60;
+  }
+  return { h, s, l };
+}
+
+function clamp(val, min, max) {
+  return Math.max(min, Math.min(max, val));
+}
+
+function hueDistance(a, b) {
+  const diff = Math.abs(a - b) % 360;
+  return diff > 180 ? 360 - diff : diff;
+}
+
+function resetDynamicTheme() {
+  const root = document.documentElement.style;
+  for (const key of DYNAMIC_THEME_VARS) {
+    root.removeProperty(key);
+  }
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", "#14532d");
+}
+
+/**
+ * 업로드된 양주중학교 교표 이미지에서 대표 색상(주색/보조색)을 추출해
+ * 대비(WCAG)가 보장되는 앱 테마 색감으로 자동 조화
+ */
+function applyThemeFromLogoSrc(src) {
+  if (!src) {
+    resetDynamicTheme();
+    return;
+  }
+
+  const img = new Image();
+  img.crossOrigin = "anonymous";
+  img.onload = () => {
+    try {
+      const size = 48;
+      const canvas = document.createElement("canvas");
+      canvas.width = size;
+      canvas.height = size;
+      const ctx = canvas.getContext("2d", { willReadFrequently: true });
+      ctx.clearRect(0, 0, size, size);
+      ctx.drawImage(img, 0, 0, size, size);
+      const { data } = ctx.getImageData(0, 0, size, size);
+
+      const bins = Array.from({ length: 24 }, () => ({
+        weight: 0,
+        hSum: 0,
+        sSum: 0,
+        lSum: 0
+      }));
+
+      for (let i = 0; i < data.length; i += 4) {
+        const a = data[i + 3];
+        if (a < 160) continue;
+        const { h, s, l } = rgbToHsl(data[i], data[i + 1], data[i + 2]);
+        // 흰색/검정/회색 배경 제외
+        if (s < 0.22 || l < 0.12 || l > 0.88) continue;
+
+        const binIdx = Math.floor(((h % 360) + 360) % 360 / 15) % 24;
+        const weight = s * (1 - Math.abs(l - 0.45));
+        bins[binIdx].weight += weight;
+        bins[binIdx].hSum += h * weight;
+        bins[binIdx].sSum += s * weight;
+        bins[binIdx].lSum += l * weight;
+      }
+
+      const ranked = bins
+        .filter((b) => b.weight > 0.8)
+        .map((b) => ({
+          weight: b.weight,
+          h: Math.round(b.hSum / b.weight),
+          s: Math.round((b.sSum / b.weight) * 100),
+          l: Math.round((b.lSum / b.weight) * 100)
+        }))
+        .sort((a, b) => b.weight - a.weight);
+
+      if (ranked.length === 0) {
+        resetDynamicTheme();
+        return;
+      }
+
+      // 노란색(45~65도)만 단독 주색이면 텍스트 대비가 낮으므로 녹/청/남/자주 계열이 함께 있으면 그쪽을 주색, 노랑을 포인트로 사용
+      let primary = ranked[0];
+      let accent = null;
+
+      if (primary.h >= 38 && primary.h <= 68 && ranked.length > 1) {
+        const nonYellow = ranked.find((c) => !(c.h >= 38 && c.h <= 68) && c.weight >= primary.weight * 0.25);
+        if (nonYellow) {
+          accent = primary;
+          primary = nonYellow;
+        }
+      }
+
+      if (!accent) {
+        accent = ranked.find((c) => hueDistance(c.h, primary.h) >= 40 && c.weight >= primary.weight * 0.14) || null;
+      }
+
+      const pH = primary.h;
+      const pS = clamp(primary.s, 45, 70);
+      const root = document.documentElement.style;
+
+      root.setProperty("--bg", `hsl(${pH}, 18%, 96%)`);
+      root.setProperty("--surface-alt", `hsl(${pH}, 22%, 98%)`);
+      root.setProperty("--border", `hsl(${pH}, 18%, 88%)`);
+      root.setProperty("--border-strong", `hsl(${pH}, 16%, 78%)`);
+
+      root.setProperty("--primary", `hsl(${pH}, ${pS}%, 28%)`);
+      root.setProperty("--primary-hover", `hsl(${pH}, ${clamp(pS + 4, 48, 76)}%, 22%)`);
+      root.setProperty("--primary-soft", `hsl(${pH}, ${clamp(pS, 45, 75)}%, 95%)`);
+      root.setProperty("--primary-border", `hsl(${pH}, ${clamp(pS, 40, 68)}%, 79%)`);
+      root.setProperty("--primary-ring", `hsla(${pH}, ${pS}%, 30%, 0.18)`);
+
+      root.setProperty("--header-bg-start", `hsl(${pH}, ${clamp(pS + 4, 46, 74)}%, 17%)`);
+      root.setProperty("--header-bg-mid", `hsl(${pH}, ${pS}%, 23%)`);
+      root.setProperty("--header-bg-end", `hsl(${pH}, ${clamp(pS - 2, 42, 68)}%, 29%)`);
+
+      if (accent) {
+        const aH = accent.h;
+        const aS = clamp(accent.s, 55, 88);
+        const tagL = aH >= 38 && aH <= 68 ? 36 : 38;
+        root.setProperty("--accent-bg", `hsl(${aH}, 92%, 96%)`);
+        root.setProperty("--accent-border", `hsl(${aH}, ${aS}%, 48%)`);
+        root.setProperty("--accent-tag-bg", `hsl(${aH}, ${clamp(aS, 58, 82)}%, ${tagL}%)`);
+      } else {
+        root.removeProperty("--accent-bg");
+        root.removeProperty("--accent-border");
+        root.removeProperty("--accent-tag-bg");
+      }
+
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute("content", `hsl(${pH}, ${pS}%, 23%)`);
+    } catch {
+      resetDynamicTheme();
+    }
+  };
+  img.onerror = () => resetDynamicTheme();
+  img.src = src;
+}
+
 function applySchoolLogoUI(logoSrc) {
   const showLogo = (src) => {
     if (el.loginLogoImg) {
@@ -672,6 +855,7 @@ function applySchoolLogoUI(logoSrc) {
       el.settingLogoPreview.hidden = false;
     }
     if (el.settingLogoEmpty) el.settingLogoEmpty.hidden = true;
+    applyThemeFromLogoSrc(src);
   };
 
   const hideLogo = () => {
@@ -680,6 +864,7 @@ function applySchoolLogoUI(logoSrc) {
     if (el.headerLogoImg) el.headerLogoImg.hidden = true;
     if (el.settingLogoPreview) el.settingLogoPreview.hidden = true;
     if (el.settingLogoEmpty) el.settingLogoEmpty.hidden = false;
+    resetDynamicTheme();
   };
 
   if (logoSrc) {
@@ -1169,9 +1354,9 @@ function renderTodayDutyBadge() {
     el.todayDutyTeachers.classList.remove("is-empty");
     el.todayDutyTeachers.title = `${targetDate} 담당 선생님: ${teachers.join(", ")}`;
   } else {
-    el.todayDutyNames.textContent = "미지정";
+    el.todayDutyNames.textContent = "미지정 · 눌러서 등록";
     el.todayDutyTeachers.classList.add("is-empty");
-    el.todayDutyTeachers.title = `${targetDate} 담당 선생님이 등록되지 않았습니다.`;
+    el.todayDutyTeachers.title = `${targetDate} 담당 선생님이 등록되지 않았습니다. 눌러서 등록하세요.`;
   }
 }
 

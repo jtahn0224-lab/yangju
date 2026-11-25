@@ -3,11 +3,11 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-  <meta name="theme-color" content="#1e3a8a" />
-  <title>교문지도 실시간 체크</title>
+  <meta name="theme-color" content="#14532d" />
+  <title>양주중학교 교문지도</title>
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin />
   <link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css" />
-  <link rel="stylesheet" href="./css/style.css?v=20261125-5" />
+  <link rel="stylesheet" href="./css/style.css?v=20261125-6" />
 </head>
 <body>
   <!-- 교사 접속(PIN) 게이트 화면 -->
@@ -155,10 +155,16 @@
             <span>지도 순번</span>
           </button>
 
-          <span id="today-duty-teachers" class="duty-today-badge" title="선택 날짜 교문지도 담당 선생님">
-            <span class="duty-label">오늘 담당</span>
+          <button type="button" id="today-duty-teachers" class="duty-today-badge is-empty" title="선택 날짜 교문지도 담당 선생님 (눌러서 달력 보기)">
+            <span class="duty-badge-tag">
+              <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+              </svg>
+              <span class="duty-label">오늘 담당</span>
+            </span>
             <strong id="today-duty-names">미지정</strong>
-          </span>
+          </button>
         </div>
 
         <div class="stat-pills">
@@ -727,6 +733,6 @@
 
   <!-- SheetJS (엑셀 .xlsx/.xls 파싱용, 실패해도 CSV는 내장 파서로 동작) -->
   <script src="https://cdn.sheetjs.com/xlsx-0.20.3/package/dist/xlsx.full.min.js" defer></script>
-  <script type="module" src="./js/app.js?v=20261125-5"></script>
+  <script type="module" src="./js/app.js?v=20261125-6"></script>
 </body>
 </html>
