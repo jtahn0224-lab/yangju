@@ -60,7 +60,8 @@ function createEmptyLocalStore() {
       repeatPeriodDays: 30
     },
     students: {},
-    daily: {}
+    daily: {},
+    dutySchedule: {}
   };
 }
 
@@ -75,7 +76,8 @@ function readLocalStore() {
         ...(parsed.settings || {})
       },
       students: parsed.students || {},
-      daily: parsed.daily || {}
+      daily: parsed.daily || {},
+      dutySchedule: parsed.dutySchedule || {}
     };
   } catch {
     return createEmptyLocalStore();
@@ -131,7 +133,8 @@ export class GateDatabase {
       connection: new Set(),
       settings: new Set(),
       students: new Set(),
-      daily: new Set()
+      daily: new Set(),
+      dutySchedule: new Set()
     };
 
     this._unsubDaily = null;
@@ -191,6 +194,10 @@ export class GateDatabase {
         this._emit("students", snap.val() || {});
       });
 
+      dbMod.onValue(dbMod.ref(this.db, "dutySchedule"), (snap) => {
+        this._emit("dutySchedule", snap.val() || {});
+      });
+
       return { mode: "firebase" };
     } catch (err) {
       console.error("[Firebase] 초기화 실패 — 로컬 체험 모드로 전환합니다:", err);
@@ -207,12 +214,14 @@ export class GateDatabase {
     const store = readLocalStore();
     this._emit("settings", normalizeSettings(store.settings));
     this._emit("students", store.students || {});
+    this._emit("dutySchedule", store.dutySchedule || {});
 
     window.addEventListener("storage", (e) => {
       if (e.key !== LOCAL_STORAGE_KEY) return;
       const updated = readLocalStore();
       this._emit("settings", normalizeSettings(updated.settings));
       this._emit("students", updated.students || {});
+      this._emit("dutySchedule", updated.dutySchedule || {});
       if (this.currentDate) {
         this._emit("daily", updated.daily[this.currentDate] || { attendance: {}, records: {} });
       }
@@ -417,5 +426,71 @@ export class GateDatabase {
         this._emit("daily", store.daily[dateStr]);
       }
     }
+  }
+
+  /**
+   * 지도 순번(일자별 담당 교사) 일괄 저장 (merge: 기존 일정에 추가/덮어쓰기, replace: 전체 교체)
+   */
+  async saveDutySchedule(scheduleMap, mode = "merge") {
+    if (this.mode === "firebase" && this.db && this.fbMod) {
+      const targetRef = this.fbMod.ref(this.db, "dutySchedule");
+      if (mode === "replace") {
+        await this.fbMod.set(targetRef, scheduleMap);
+      } else {
+        await this.fbMod.update(targetRef, scheduleMap);
+      }
+      return;
+    }
+
+    const store = readLocalStore();
+    store.dutySchedule =
+      mode === "replace"
+        ? { ...scheduleMap }
+        : { ...(store.dutySchedule || {}), ...scheduleMap };
+    writeLocalStore(store);
+    this._emit("dutySchedule", store.dutySchedule);
+  }
+
+  /**
+   * 특정 날짜의 담당 교사 지정 또는 삭제(빈 배열/null)
+   */
+  async setDutyForDate(dateStr, teachers) {
+    const clean = Array.isArray(teachers)
+      ? teachers.map((t) => String(t).trim()).filter(Boolean)
+      : [];
+
+    if (this.mode === "firebase" && this.db && this.fbMod) {
+      const targetRef = this.fbMod.ref(this.db, `dutySchedule/${dateStr}`);
+      if (clean.length === 0) {
+        await this.fbMod.remove(targetRef);
+      } else {
+        await this.fbMod.set(targetRef, { teachers: clean });
+      }
+      return;
+    }
+
+    const store = readLocalStore();
+    if (!store.dutySchedule) store.dutySchedule = {};
+    if (clean.length === 0) {
+      delete store.dutySchedule[dateStr];
+    } else {
+      store.dutySchedule[dateStr] = { teachers: clean };
+    }
+    writeLocalStore(store);
+    this._emit("dutySchedule", store.dutySchedule);
+  }
+
+  /**
+   * 지도 순번 전체 삭제
+   */
+  async clearDutySchedule() {
+    if (this.mode === "firebase" && this.db && this.fbMod) {
+      await this.fbMod.remove(this.fbMod.ref(this.db, "dutySchedule"));
+      return;
+    }
+    const store = readLocalStore();
+    store.dutySchedule = {};
+    writeLocalStore(store);
+    this._emit("dutySchedule", {});
   }
 }

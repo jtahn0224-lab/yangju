@@ -10,7 +10,9 @@ import {
   getSampleStudentsMap,
   downloadCsv,
   downloadSampleRosterCsv,
-  parseRosterFile
+  parseRosterFile,
+  parseDutyScheduleFile,
+  downloadSampleDutyCsv
 } from "./roster.js";
 
 const SESSION_KEY = "gate_teacher_session_v1";
@@ -37,6 +39,11 @@ const state = {
     records: {}
   },
   rangeDailyMap: {},
+  dutySchedule: {},
+  calendarYear: new Date().getFullYear(),
+  calendarMonth: new Date().getMonth() + 1,
+  selectedDutyDate: getTodayDateString(),
+  pendingDutyUpload: null,
   repeatCategory: "all", // "all" | "late" | "guidance"
   repeatLoading: false,
   activeTab: "gate",
@@ -81,6 +88,9 @@ const el = {
   demoGuideBtn: document.getElementById("demo-guide-btn"),
 
   activeDateInput: document.getElementById("active-date-input"),
+  openDutyScheduleBtn: document.getElementById("open-duty-schedule-btn"),
+  todayDutyTeachers: document.getElementById("today-duty-teachers"),
+  todayDutyNames: document.getElementById("today-duty-names"),
   statPresent: document.getElementById("stat-present"),
   statTotal: document.getElementById("stat-total"),
   statAbsent: document.getElementById("stat-absent"),
@@ -162,6 +172,25 @@ const el = {
   modalGuidanceChips: document.getElementById("modal-guidance-chips"),
   modalGuidanceMemo: document.getElementById("modal-guidance-memo"),
   setupGuideModal: document.getElementById("setup-guide-modal"),
+  dutyScheduleModal: document.getElementById("duty-schedule-modal"),
+  calPrevMonthBtn: document.getElementById("cal-prev-month-btn"),
+  calMonthTitle: document.getElementById("cal-month-title"),
+  calNextMonthBtn: document.getElementById("cal-next-month-btn"),
+  calTodayBtn: document.getElementById("cal-today-btn"),
+  dutyCalendarGrid: document.getElementById("duty-calendar-grid"),
+  dutyDayEditForm: document.getElementById("duty-day-edit-form"),
+  dutyEditDateLabel: document.getElementById("duty-edit-date-label"),
+  dutyEditTeachersInput: document.getElementById("duty-edit-teachers-input"),
+  dutyEditClearBtn: document.getElementById("duty-edit-clear-btn"),
+  downloadSampleDutyBtn: document.getElementById("download-sample-duty-btn"),
+  clearDutyScheduleBtn: document.getElementById("clear-duty-schedule-btn"),
+  dutyDropzone: document.getElementById("duty-dropzone"),
+  dutyFileInput: document.getElementById("duty-file-input"),
+  dutyUploadPreviewBox: document.getElementById("duty-upload-preview-box"),
+  dutyUploadPreviewSummary: document.getElementById("duty-upload-preview-summary"),
+  dutyUploadPreviewSample: document.getElementById("duty-upload-preview-sample"),
+  confirmDutyUploadBtn: document.getElementById("confirm-duty-upload-btn"),
+  cancelDutyUploadBtn: document.getElementById("cancel-duty-upload-btn"),
   toastContainer: document.getElementById("toast-container")
 };
 
@@ -1027,9 +1056,161 @@ function renderRecordsTab() {
     .join("");
 }
 
+/* ============================================================
+   교문지도 순번 (오늘 담당 표시 · 월별 달력 · 엑셀 업로드)
+   ============================================================ */
+
+function getDutyTeachersForDate(dateStr) {
+  const entry = state.dutySchedule?.[dateStr];
+  if (!entry) return [];
+  if (Array.isArray(entry)) return entry.filter(Boolean);
+  if (Array.isArray(entry.teachers)) return entry.teachers.filter(Boolean);
+  if (typeof entry === "string") {
+    return entry.split(/[,/·|\n]+/).map((s) => s.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function renderTodayDutyBadge() {
+  if (!el.todayDutyTeachers || !el.todayDutyNames) return;
+  const targetDate = state.activeDate || getTodayDateString();
+  const isToday = targetDate === getTodayDateString();
+  const teachers = getDutyTeachersForDate(targetDate);
+
+  const labelEl = el.todayDutyTeachers.querySelector(".duty-label");
+  if (labelEl) {
+    labelEl.textContent = isToday ? "오늘 담당" : `${formatShortDate(targetDate)} 담당`;
+  }
+
+  if (teachers.length > 0) {
+    el.todayDutyNames.textContent = teachers.join(", ");
+    el.todayDutyTeachers.classList.remove("is-empty");
+    el.todayDutyTeachers.title = `${targetDate} 담당 선생님: ${teachers.join(", ")}`;
+  } else {
+    el.todayDutyNames.textContent = "미지정";
+    el.todayDutyTeachers.classList.add("is-empty");
+    el.todayDutyTeachers.title = `${targetDate} 담당 선생님이 등록되지 않았습니다.`;
+  }
+}
+
+function syncDutyDayEditBox() {
+  const dateStr = state.selectedDutyDate || state.activeDate;
+  const teachers = getDutyTeachersForDate(dateStr);
+  el.dutyEditDateLabel.textContent = `${dateStr} 담당 선생님`;
+  el.dutyEditTeachersInput.value = teachers.join(", ");
+}
+
+function renderDutyCalendar() {
+  const year = state.calendarYear;
+  const month = state.calendarMonth; // 1..12
+  el.calMonthTitle.textContent = `${year}년 ${month}월`;
+
+  const todayStr = getTodayDateString();
+  const firstDayOfMonth = new Date(year, month - 1, 1);
+  const startDow = firstDayOfMonth.getDay(); // 0(일)~6(토)
+  const daysInMonth = new Date(year, month, 0).getDate();
+  const prevMonthDays = new Date(year, month - 1, 0).getDate();
+  const totalCells = Math.ceil((startDow + daysInMonth) / 7) * 7;
+
+  const pad2 = (n) => String(n).padStart(2, "0");
+  const cells = [];
+
+  for (let i = 0; i < totalCells; i++) {
+    let cellYear = year;
+    let cellMonth = month;
+    let dayNum;
+    let isOutside = false;
+
+    if (i < startDow) {
+      isOutside = true;
+      dayNum = prevMonthDays - startDow + 1 + i;
+      cellMonth = month - 1;
+      if (cellMonth < 1) {
+        cellMonth = 12;
+        cellYear = year - 1;
+      }
+    } else if (i >= startDow + daysInMonth) {
+      isOutside = true;
+      dayNum = i - (startDow + daysInMonth) + 1;
+      cellMonth = month + 1;
+      if (cellMonth > 12) {
+        cellMonth = 1;
+        cellYear = year + 1;
+      }
+    } else {
+      dayNum = i - startDow + 1;
+    }
+
+    const dateStr = `${cellYear}-${pad2(cellMonth)}-${pad2(dayNum)}`;
+    const dow = i % 7;
+    const isToday = dateStr === todayStr;
+    const isSelected = dateStr === state.selectedDutyDate;
+    const teachers = getDutyTeachersForDate(dateStr);
+
+    const classes = ["cal-cell"];
+    if (isOutside) classes.push("is-outside");
+    if (dow === 0) classes.push("is-sun");
+    if (dow === 6) classes.push("is-sat");
+    if (isToday) classes.push("is-today");
+    if (isSelected) classes.push("is-selected");
+
+    const teacherHtml = teachers
+      .slice(0, 3)
+      .map((name) => `<span class="cal-teacher-chip" title="${escapeHtml(name)}">${escapeHtml(name)}</span>`)
+      .join("");
+    const moreHtml =
+      teachers.length > 3
+        ? `<span class="cal-teacher-chip">+${teachers.length - 3}명</span>`
+        : "";
+
+    cells.push(`
+      <button type="button" class="${classes.join(" ")}" data-cal-date="${dateStr}">
+        <span class="cal-day-num">
+          <span>${dayNum}</span>
+          ${isToday ? '<span class="cal-today-dot">오늘</span>' : ""}
+        </span>
+        <span class="cal-teachers">${teacherHtml}${moreHtml}</span>
+      </button>
+    `);
+  }
+
+  el.dutyCalendarGrid.innerHTML = cells.join("");
+  syncDutyDayEditBox();
+}
+
+function openDutyScheduleModal() {
+  const baseDate = state.activeDate || getTodayDateString();
+  const [y, m] = baseDate.split("-").map(Number);
+  state.calendarYear = y || new Date().getFullYear();
+  state.calendarMonth = m || new Date().getMonth() + 1;
+  state.selectedDutyDate = baseDate;
+  state.pendingDutyUpload = null;
+  el.dutyUploadPreviewBox.hidden = true;
+  renderDutyCalendar();
+  el.dutyScheduleModal.showModal();
+}
+
+async function handleDutyFileSelected(file) {
+  try {
+    const result = await parseDutyScheduleFile(file, state.calendarYear);
+    state.pendingDutyUpload = result;
+    el.dutyUploadPreviewSummary.textContent = `${result.count}일치 순번 인식됨 (${result.firstDate} ~ ${result.lastDate})${result.skipped ? ` · 제외 ${result.skipped}행` : ""}`;
+    const previewItems = Object.entries(result.scheduleMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(0, 5)
+      .map(([d, v]) => `${formatShortDate(d)}: ${v.teachers.join(", ")}`)
+      .join(" / ");
+    el.dutyUploadPreviewSample.textContent = `미리보기: ${previewItems}${result.count > 5 ? " ..." : ""}`;
+    el.dutyUploadPreviewBox.hidden = false;
+  } catch (err) {
+    showToast(err.message || "지도 순번 파일을 읽는 중 오류가 발생했습니다.", "error");
+  }
+}
+
 function renderAll() {
   renderConnectionStatus();
   renderSettingsUI();
+  renderTodayDutyBadge();
   renderSummaryCounters();
   renderGateTab();
   renderAttendanceTab();
@@ -1244,6 +1425,145 @@ function bindEvents() {
   });
   setupDialogLightDismiss(el.guidanceModal);
   setupDialogLightDismiss(el.setupGuideModal);
+  setupDialogLightDismiss(el.dutyScheduleModal);
+
+  // 지도 순번 달력 모달 열기 & 월 이동 & 날짜 편집 & 엑셀 업로드
+  el.openDutyScheduleBtn.addEventListener("click", openDutyScheduleModal);
+  el.todayDutyTeachers.addEventListener("click", openDutyScheduleModal);
+  el.todayDutyTeachers.style.cursor = "pointer";
+
+  el.calPrevMonthBtn.addEventListener("click", () => {
+    state.calendarMonth -= 1;
+    if (state.calendarMonth < 1) {
+      state.calendarMonth = 12;
+      state.calendarYear -= 1;
+    }
+    renderDutyCalendar();
+  });
+
+  el.calNextMonthBtn.addEventListener("click", () => {
+    state.calendarMonth += 1;
+    if (state.calendarMonth > 12) {
+      state.calendarMonth = 1;
+      state.calendarYear += 1;
+    }
+    renderDutyCalendar();
+  });
+
+  el.calTodayBtn.addEventListener("click", () => {
+    const today = getTodayDateString();
+    const [y, m] = today.split("-").map(Number);
+    state.calendarYear = y;
+    state.calendarMonth = m;
+    state.selectedDutyDate = today;
+    renderDutyCalendar();
+  });
+
+  el.dutyCalendarGrid.addEventListener("click", (e) => {
+    const cell = e.target.closest("[data-cal-date]");
+    if (!cell) return;
+    const picked = cell.dataset.calDate;
+    const [y, m] = picked.split("-").map(Number);
+    state.selectedDutyDate = picked;
+    if (y !== state.calendarYear || m !== state.calendarMonth) {
+      state.calendarYear = y;
+      state.calendarMonth = m;
+    }
+    renderDutyCalendar();
+    el.dutyEditTeachersInput.focus();
+  });
+
+  el.dutyDayEditForm.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const dateStr = state.selectedDutyDate;
+    const raw = el.dutyEditTeachersInput.value.trim();
+    const teachers = raw
+      .split(/[,/·|\n]+/)
+      .map((s) => s.trim())
+      .filter(Boolean);
+    try {
+      await db.setDutyForDate(dateStr, teachers);
+      showToast(
+        teachers.length > 0
+          ? `${dateStr} 담당 선생님이 저장되었습니다.`
+          : `${dateStr} 담당 선생님이 비워졌습니다.`,
+        "success"
+      );
+    } catch (err) {
+      console.error(err);
+      showToast("지도 순번 저장 중 오류가 발생했습니다.", "error");
+    }
+  });
+
+  el.dutyEditClearBtn.addEventListener("click", async () => {
+    const dateStr = state.selectedDutyDate;
+    try {
+      await db.setDutyForDate(dateStr, []);
+      showToast(`${dateStr} 담당 선생님이 비워졌습니다.`);
+    } catch (err) {
+      console.error(err);
+      showToast("삭제 중 오류가 발생했습니다.", "error");
+    }
+  });
+
+  el.downloadSampleDutyBtn.addEventListener("click", () => {
+    downloadSampleDutyCsv(state.calendarYear, state.calendarMonth);
+    showToast("지도 순번 샘플 CSV 양식이 다운로드되었습니다.");
+  });
+
+  el.clearDutyScheduleBtn.addEventListener("click", async () => {
+    if (Object.keys(state.dutySchedule || {}).length === 0) return;
+    if (!confirm("등록된 모든 날짜의 지도 순번을 삭제하시겠습니까?")) return;
+    await db.clearDutySchedule();
+    showToast("전체 지도 순번이 삭제되었습니다.");
+  });
+
+  el.dutyDropzone.addEventListener("click", () => el.dutyFileInput.click());
+  el.dutyDropzone.addEventListener("dragover", (e) => {
+    e.preventDefault();
+    el.dutyDropzone.classList.add("dragover");
+  });
+  el.dutyDropzone.addEventListener("dragleave", () => {
+    el.dutyDropzone.classList.remove("dragover");
+  });
+  el.dutyDropzone.addEventListener("drop", (e) => {
+    e.preventDefault();
+    el.dutyDropzone.classList.remove("dragover");
+    const file = e.dataTransfer?.files?.[0];
+    if (file) handleDutyFileSelected(file);
+  });
+  el.dutyFileInput.addEventListener("change", () => {
+    const file = el.dutyFileInput.files?.[0];
+    if (file) handleDutyFileSelected(file);
+    el.dutyFileInput.value = "";
+  });
+
+  el.confirmDutyUploadBtn.addEventListener("click", async () => {
+    if (!state.pendingDutyUpload) return;
+    const mode = document.querySelector('input[name="dutyImportMode"]:checked')?.value || "merge";
+    try {
+      await db.saveDutySchedule(state.pendingDutyUpload.scheduleMap, mode);
+      const firstDate = state.pendingDutyUpload.firstDate;
+      if (firstDate) {
+        const [y, m] = firstDate.split("-").map(Number);
+        state.calendarYear = y;
+        state.calendarMonth = m;
+        state.selectedDutyDate = firstDate;
+      }
+      showToast(`${state.pendingDutyUpload.count}일치 지도 순번이 실시간 반영되었습니다!`, "success");
+      state.pendingDutyUpload = null;
+      el.dutyUploadPreviewBox.hidden = true;
+      renderDutyCalendar();
+    } catch (err) {
+      console.error(err);
+      showToast("지도 순번 저장 중 오류가 발생했습니다.", "error");
+    }
+  });
+
+  el.cancelDutyUploadBtn.addEventListener("click", () => {
+    state.pendingDutyUpload = null;
+    el.dutyUploadPreviewBox.hidden = true;
+  });
 
   const openGuide = () => el.setupGuideModal.showModal();
   el.openSetupGuideBtn.addEventListener("click", openGuide);
@@ -1294,6 +1614,7 @@ function bindEvents() {
     const nextDate = el.activeDateInput.value || getTodayDateString();
     state.activeDate = nextDate;
     db.subscribeDate(nextDate);
+    renderTodayDutyBadge();
     refreshRepeatStudentsData(true);
     showToast(`${nextDate} 기록을 불러왔습니다.`);
   });
@@ -1780,6 +2101,14 @@ async function bootstrap() {
     renderGateTab();
     renderAttendanceTab();
     renderRecordsTab();
+  });
+
+  db.on("dutySchedule", (scheduleMap) => {
+    state.dutySchedule = scheduleMap || {};
+    renderTodayDutyBadge();
+    if (el.dutyScheduleModal.open) {
+      renderDutyCalendar();
+    }
   });
 
   await db.init();
